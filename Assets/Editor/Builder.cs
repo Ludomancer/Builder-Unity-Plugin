@@ -8,6 +8,7 @@ using System.Linq;
 [Serializable]
 public class Builder : EditorWindow
 {
+	// How to save the configurations.
     enum SaveMode
     {
         AsDefault,
@@ -15,6 +16,7 @@ public class Builder : EditorWindow
         SaveAs
     }
 
+	// Sort mode for the build list.
     enum SortMode
     {
         None,
@@ -23,12 +25,14 @@ public class Builder : EditorWindow
         ById,
     }
 
+	// Sort direction of for the sort mode.
     enum SortDirection
     {
         Ascending,
         Descending
     }
 
+	// Holds a single build configuration.
     [Serializable]
     class BuildConfiguration
     {
@@ -67,8 +71,10 @@ public class Builder : EditorWindow
         public string uniqueId;
     }
 
+	// Folder to output our builds.
     static string _mainBuildPath;
 
+	// Holds scene information
     [Serializable]
     struct Scene
     {
@@ -76,23 +82,36 @@ public class Builder : EditorWindow
         public string name;
     }
 
+	// List of scenes
     static Scene[] _sceneList;
+	// List of builds
     static List<BuildConfiguration> _builds;
+	// Scrollbar position
     static Vector2 _scrollPosition;
+	// Most recent configuration.
     static string mostRecentConfiguration;
+	// Current sort mode.
     static SortMode _sortMode;
+	// Current sort direction.
     static SortDirection _sortDirection;
     static EditorWindow window;
+	// Temporary list for build report. May not be necessary. Probably leftover code from previous versions.
     static List<string> buildReport;
-
+	// Default builds options to use when creating a new build configuration.
     static BuildOptions _defaultBuildOptions;
-
+	// Should we return back to initial configuration after builds completed.
     static bool _resetTarget;
+	// Pretty clear?
     static bool isBuilding;
+	// Small delay after the build. Probably not necessary.
     static float delayEnd;
+	// Which configration we are currently iterating.
     static int buildIndex;
+	// Well. Timetamp of build.
     static string _timeStamp;
+	// Timestamp format.
     static string _dateTimeFormat = "yy.MM.dd";
+	// Toggle variable for Foldout UI.
     static bool _sortUtilsToggle = true;
     static bool _toolOptionsToggle = true;
     static bool _listUtilsToggle = true;
@@ -104,8 +123,10 @@ public class Builder : EditorWindow
     static void ShowWindow()
     {
         if (_builds != null) _builds.Clear();
+		//Load scenes
         RefreshSceneList();
 
+		//Load settings and default configuration
         LoadToolSettings();
         LoadSettings(false);
 
@@ -118,7 +139,10 @@ public class Builder : EditorWindow
         }
         window = (Builder)EditorWindow.GetWindow(typeof(Builder));
     }
-
+	/// <summary>
+	/// Load scenes included in build options.
+	/// This method might cause loss of data if scenes are renamed or reordered.
+	/// </summary>
     static void RefreshSceneList()
     {
         List<Scene> temp = new List<Scene>();
@@ -136,6 +160,10 @@ public class Builder : EditorWindow
         _sceneList = temp.OrderBy(scene => scene.name).ToArray();
     }
 
+	/// <summary>
+	/// Saves the configurations.
+	/// </summary>
+	/// <param name="mode">Save Mode.</param>
     static void SaveSettings(SaveMode mode)
     {
         Dictionary<string, object> settings = new Dictionary<string, object>();
@@ -204,6 +232,10 @@ public class Builder : EditorWindow
 
     }
 
+	/// <summary>
+	/// Loads the configurations.
+	/// </summary>
+	/// <param name="manual">If set to <c>true</c> prompts user to select configuration to load. Otherwise loads the default configuration.</param>
     static void LoadSettings(bool manual)
     {
         string dirPath;
@@ -324,6 +356,9 @@ public class Builder : EditorWindow
         }
     }
 
+	/// <summary>
+	/// Saves the tool settings.
+	/// </summary>
     static void SaveToolSettings()
     {
         string path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Unity/Nidre/Builder/Settings.ini");
@@ -341,6 +376,9 @@ public class Builder : EditorWindow
         }
     }
 
+	/// <summary>
+	/// Loads the tool settings.
+	/// </summary>
     static void LoadToolSettings()
     {
         string dirPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Unity/Nidre/Builder");
@@ -385,6 +423,9 @@ public class Builder : EditorWindow
         }
     }
 
+	/// <summary>
+	/// Resets the settings.
+	/// </summary>
     static void ResetSettings()
     {
         _builds = null;
@@ -396,6 +437,9 @@ public class Builder : EditorWindow
         SaveToolSettings();
     }
 
+	/// <summary>
+	/// Selects the build path.
+	/// </summary>
     static void SelectBuildPath()
     {
         if (!string.IsNullOrEmpty(_mainBuildPath))
@@ -688,6 +732,9 @@ public class Builder : EditorWindow
         if (window) EditorUtility.SetDirty(window);
     }
 
+	/// <summary>
+	/// Applies the sort.
+	/// </summary>
     private static void ApplySort()
     {
         switch (_sortMode)
@@ -707,6 +754,10 @@ public class Builder : EditorWindow
         }
     }
 
+	/// <summary>
+	/// Displays the build configuration list utilities.
+	/// </summary>
+	/// <param name="i">The build index.</param>
     static void BuildConfListUtils(int i)
     {
         GUI.enabled = i > 0;
@@ -765,6 +816,10 @@ public class Builder : EditorWindow
         GUI.enabled = true;
     }
 
+	/// <summary>
+	/// Iterates and build each item in build list.
+	/// May reorder list if _resetTarget is true to make sure we return back to initial configration in most optimal way.
+	/// </summary>
     static void Build()
     {
         BuildTarget _initBuildTarget = EditorUserBuildSettings.activeBuildTarget;
