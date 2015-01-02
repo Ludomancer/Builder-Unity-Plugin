@@ -8,7 +8,7 @@ using System.Linq;
 [Serializable]
 public class Builder : EditorWindow
 {
-	// How to save the configurations.
+    // How to save the configuration file.
     enum SaveMode
     {
         AsDefault,
@@ -16,7 +16,15 @@ public class Builder : EditorWindow
         SaveAs
     }
 
-	// Sort mode for the build list.
+    // How to load the configuration file.
+    enum LoadMode
+    {
+        Default,
+        AskForPath,
+        Args
+    }
+
+    // Sort mode for the build list.
     enum SortMode
     {
         None,
@@ -25,14 +33,14 @@ public class Builder : EditorWindow
         ById,
     }
 
-	// Sort direction of for the sort mode.
+    // Sort direction of for the sort mode.
     enum SortDirection
     {
         Ascending,
         Descending
     }
 
-	// Holds a single build configuration.
+    // Holds a single build configuration.
     [Serializable]
     class BuildConfiguration
     {
@@ -71,10 +79,10 @@ public class Builder : EditorWindow
         public string uniqueId;
     }
 
-	// Folder to output our builds.
+    // Folder to output our builds.
     static string _mainBuildPath;
 
-	// Holds scene information
+    // Holds scene information
     [Serializable]
     struct Scene
     {
@@ -82,36 +90,34 @@ public class Builder : EditorWindow
         public string name;
     }
 
-	// List of scenes
+    // List of scenes
     static Scene[] _sceneList;
-	// List of builds
+    // List of builds
     static List<BuildConfiguration> _builds;
-	// Scrollbar position
+    // Scrollbar position
     static Vector2 _scrollPosition;
-	// Most recent configuration.
+    // Most recent configuration.
     static string mostRecentConfiguration;
-	// Current sort mode.
+    // Current sort mode.
     static SortMode _sortMode;
-	// Current sort direction.
+    // Current sort direction.
     static SortDirection _sortDirection;
     static EditorWindow window;
-	// Temporary list for build report. May not be necessary. Probably leftover code from previous versions.
-    static List<string> buildReport;
-	// Default builds options to use when creating a new build configuration.
+    // Default builds options to use when creating a new build configuration.
     static BuildOptions _defaultBuildOptions;
-	// Should we return back to initial configuration after builds completed.
+    // Should we return back to initial configuration after builds completed.
     static bool _resetTarget;
-	// Pretty clear?
+    // Pretty clear?
     static bool isBuilding;
-	// Small delay after the build. Probably not necessary.
+    // Small delay after the build. Probably not necessary.
     static float delayEnd;
-	// Which configration we are currently iterating.
+    // Which configration we are currently iterating.
     static int buildIndex;
-	// Well. Timetamp of build.
+    // Well. Timetamp of build.
     static string _timeStamp;
-	// Timestamp format.
+    // Timestamp format.
     static string _dateTimeFormat = "yy.MM.dd";
-	// Toggle variable for Foldout UI.
+    // Toggle variable for Foldout UI.
     static bool _sortUtilsToggle = true;
     static bool _toolOptionsToggle = true;
     static bool _listUtilsToggle = true;
@@ -123,12 +129,12 @@ public class Builder : EditorWindow
     static void ShowWindow()
     {
         if (_builds != null) _builds.Clear();
-		//Load scenes
+        //Load scenes
         RefreshSceneList();
 
-		//Load settings and default configuration
+        //Load settings and default configuration
         LoadToolSettings();
-        LoadSettings(false);
+        LoadSettings(LoadMode.Default);
 
         //Load Failed
         if (_builds == null)
@@ -139,10 +145,19 @@ public class Builder : EditorWindow
         }
         window = (Builder)EditorWindow.GetWindow(typeof(Builder));
     }
-	/// <summary>
-	/// Load scenes included in build options.
-	/// This method might cause loss of data if scenes are renamed or reordered.
-	/// </summary>
+
+    static void CommandLineBuild()
+    {
+        RefreshSceneList();
+        LoadToolSettings();
+        LoadSettings(LoadMode.Args);
+        Build();
+    }
+
+    /// <summary>
+    /// Load scenes included in build options.
+    /// This method might cause loss of data if scenes are renamed or reordered.
+    /// </summary>
     static void RefreshSceneList()
     {
         List<Scene> temp = new List<Scene>();
@@ -160,10 +175,10 @@ public class Builder : EditorWindow
         _sceneList = temp.OrderBy(scene => scene.name).ToArray();
     }
 
-	/// <summary>
-	/// Saves the configurations.
-	/// </summary>
-	/// <param name="mode">Save Mode.</param>
+    /// <summary>
+    /// Saves the configurations.
+    /// </summary>
+    /// <param name="mode">Save Mode.</param>
     static void SaveSettings(SaveMode mode)
     {
         Dictionary<string, object> settings = new Dictionary<string, object>();
@@ -232,39 +247,51 @@ public class Builder : EditorWindow
 
     }
 
-	/// <summary>
-	/// Loads the configurations.
-	/// </summary>
-	/// <param name="manual">If set to <c>true</c> prompts user to select configuration to load. Otherwise loads the default configuration.</param>
-    static void LoadSettings(bool manual)
+    /// <summary>
+    /// Loads the configurations.
+    /// </summary>
+    static void LoadSettings(LoadMode loadMode)
     {
         string dirPath;
-        string filePath;
-        if (!manual)
+        string filePath = null;
+        switch (loadMode)
         {
-            dirPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Unity/Nidre/Builder");
-            filePath = Path.Combine(dirPath, "Default.ini");
+            case LoadMode.Default:
+                dirPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Unity/Nidre/Builder");
+                filePath = Path.Combine(dirPath, "Default.ini");
+                // Create initial golder structure
+                if (!Directory.Exists(dirPath)) Directory.CreateDirectory(dirPath);
+                // Save default settings
+                if (!File.Exists(filePath))
+                {
+                    File.Create(filePath).Close();
+                    _mainBuildPath = null;
+                    _builds = new List<BuildConfiguration>();
+                    _builds.Add(new BuildConfiguration());
+                    SaveSettings(SaveMode.AsDefault);
+                }
+                break;
+            case LoadMode.AskForPath:
+                dirPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Unity/Nidre/Builder");
+                filePath = EditorUtility.OpenFilePanel("Load Configuration", dirPath, "ini");
+                break;
+            case LoadMode.Args:
+                string[] args = Environment.GetCommandLineArgs();
+                if (args != null && args.Length > 1)
+                {
+                    filePath = CommandLineReader.GetCustomArgument("confPath");
+                    if (!File.Exists(filePath))
+                    {
+                        throw new FileNotFoundException("Configuration file not found" + filePath, filePath);
+                    }
+                }
+                else
+                {
+                    throw new ArgumentException("Arguments missing.", "filePath");
+                }
+                break;
         }
-        else
-        {
-            dirPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Unity/Nidre/Builder");
-            filePath = EditorUtility.OpenFilePanel("Load Configuration", dirPath, "ini");
-        }
-
-        if (!Directory.Exists(dirPath)) Directory.CreateDirectory(dirPath);
-        if (!File.Exists(filePath))
-        {
-            File.Create(filePath).Close();
-            _mainBuildPath = null;
-            _builds = new List<BuildConfiguration>();
-            _builds.Add(new BuildConfiguration());
-            SaveSettings(SaveMode.AsDefault);
-        }
-        string serialized;
-        using (StreamReader reader = new StreamReader(filePath))
-        {
-            serialized = reader.ReadToEnd();
-        }
+        string serialized = System.IO.File.ReadAllText(filePath);
 
         if (serialized != null)
         {
@@ -318,33 +345,29 @@ public class Builder : EditorWindow
                     e.GetType() == typeof(NullReferenceException) ||
                     e.GetType() == typeof(KeyNotFoundException))
                 {
-                    int dialogResult;
-                    if (manual)
+                    switch (loadMode)
                     {
-
-                        if (EditorUtility.DisplayDialog("Can't read configuration!", "File seems to be corrupt", "Cancel", "Retry"))
-                        {
-                            dialogResult = 0;
-                        }
-                        else
-                        {
-                            dialogResult = 2;
-                        }
-                    }
-                    else
-                    {
-                        dialogResult = EditorUtility.DisplayDialogComplex("Can't read configuration!", "File seems to be corrupt", "Cancel", "Reset", "Retry");
-                    }
-
-                    if (dialogResult == 1)
-                    {
-                        _builds = new List<BuildConfiguration>();
-                        _builds.Add(new BuildConfiguration());
-                        SaveSettings(SaveMode.AsDefault);
-                    }
-                    else if (dialogResult == 2)
-                    {
-                        LoadSettings(manual);
+                        case LoadMode.Default:
+                            int dialogResult = EditorUtility.DisplayDialogComplex("Can't read configuration!", "File seems to be corrupt", "Cancel", "Reset", "Retry");
+                            if (dialogResult == 1)
+                            {
+                                _builds = new List<BuildConfiguration>();
+                                _builds.Add(new BuildConfiguration());
+                                SaveSettings(SaveMode.AsDefault);
+                            }
+                            else if (dialogResult == 2)
+                            {
+                                LoadSettings(loadMode);
+                            }
+                            break;
+                        case LoadMode.AskForPath:
+                            if (!EditorUtility.DisplayDialog("Can't read configuration!", "File seems to be corrupt", "Cancel", "Retry"))
+                            {
+                                LoadSettings(loadMode);
+                            }
+                            break;
+                        case LoadMode.Args:
+                            throw new FileLoadException("Can't read configuration!");
                     }
                 }
                 else Debug.LogException(e);
@@ -356,9 +379,9 @@ public class Builder : EditorWindow
         }
     }
 
-	/// <summary>
-	/// Saves the tool settings.
-	/// </summary>
+    /// <summary>
+    /// Saves the tool settings.
+    /// </summary>
     static void SaveToolSettings()
     {
         string path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Unity/Nidre/Builder/Settings.ini");
@@ -376,9 +399,9 @@ public class Builder : EditorWindow
         }
     }
 
-	/// <summary>
-	/// Loads the tool settings.
-	/// </summary>
+    /// <summary>
+    /// Loads the tool settings.
+    /// </summary>
     static void LoadToolSettings()
     {
         string dirPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Unity/Nidre/Builder");
@@ -423,9 +446,9 @@ public class Builder : EditorWindow
         }
     }
 
-	/// <summary>
-	/// Resets the settings.
-	/// </summary>
+    /// <summary>
+    /// Resets the settings.
+    /// </summary>
     static void ResetSettings()
     {
         _builds = null;
@@ -437,9 +460,9 @@ public class Builder : EditorWindow
         SaveToolSettings();
     }
 
-	/// <summary>
-	/// Selects the build path.
-	/// </summary>
+    /// <summary>
+    /// Selects the build path.
+    /// </summary>
     static void SelectBuildPath()
     {
         if (!string.IsNullOrEmpty(_mainBuildPath))
@@ -473,7 +496,7 @@ public class Builder : EditorWindow
                 }
                 if (GUILayout.Button("Load", EditorStyles.miniButtonRight))
                 {
-                    LoadSettings(true);
+                    LoadSettings(LoadMode.AskForPath);
                 }
                 EditorGUILayout.Space();
                 if (GUILayout.Button("Save as Default", EditorStyles.miniButtonLeft))
@@ -486,7 +509,7 @@ public class Builder : EditorWindow
                 }
                 if (GUILayout.Button("Load Default", EditorStyles.miniButtonRight))
                 {
-                    LoadSettings(false);
+                    LoadSettings(LoadMode.Default);
                 }
                 GUILayout.FlexibleSpace();
                 if (GUILayout.Button("Refresh Scenes", EditorStyles.miniButton))
@@ -713,8 +736,6 @@ public class Builder : EditorWindow
                 if (GUILayout.Button("Start Build", GUILayout.Width(100)))
                 {
                     isBuilding = true;
-                    if (buildReport != null) buildReport.Clear();
-                    else buildReport = new List<string>();
                     SelectBuildPath();
                     EditorGUILayout.EndScrollView();
                     Build();
@@ -732,9 +753,9 @@ public class Builder : EditorWindow
         if (window) EditorUtility.SetDirty(window);
     }
 
-	/// <summary>
-	/// Applies the sort.
-	/// </summary>
+    /// <summary>
+    /// Applies the sort.
+    /// </summary>
     private static void ApplySort()
     {
         switch (_sortMode)
@@ -754,10 +775,10 @@ public class Builder : EditorWindow
         }
     }
 
-	/// <summary>
-	/// Displays the build configuration list utilities.
-	/// </summary>
-	/// <param name="i">The build index.</param>
+    /// <summary>
+    /// Displays the build configuration list utilities.
+    /// </summary>
+    /// <param name="i">The build index.</param>
     static void BuildConfListUtils(int i)
     {
         GUI.enabled = i > 0;
@@ -816,10 +837,10 @@ public class Builder : EditorWindow
         GUI.enabled = true;
     }
 
-	/// <summary>
-	/// Iterates and build each item in build list.
-	/// May reorder list if _resetTarget is true to make sure we return back to initial configration in most optimal way.
-	/// </summary>
+    /// <summary>
+    /// Iterates and build each item in build list.
+    /// May reorder list if _resetTarget is true to make sure we return back to initial configration in most optimal way.
+    /// </summary>
     static void Build()
     {
         BuildTarget _initBuildTarget = EditorUserBuildSettings.activeBuildTarget;
