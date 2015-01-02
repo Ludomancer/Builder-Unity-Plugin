@@ -8,4 +8,4 @@ Builder automates build process of Unity. It can automatically switch Build Opti
 
 I am planning to add more features as I require more features. I do also encourage everyone to contribute the project as you see fit.
 
-![Builder](http://wwwpub.zih.tu-dresden.de/~rklammer/html/static/RK2.png)
+![Builder](http://i.imgur.com/SsbUiT2.png)
