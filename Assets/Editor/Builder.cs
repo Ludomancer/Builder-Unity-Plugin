@@ -43,7 +43,8 @@ public class Builder : EditorWindow
     {
         AsDefault,
         Overwrite,
-        SaveAs
+        SaveAs,
+        PreCompile
     }
 
     // How to load the configuration file.
@@ -51,7 +52,8 @@ public class Builder : EditorWindow
     {
         Default,
         AskForPath,
-        Args
+        Args,
+        PostCompile
     }
 
     // Sort mode for the build list.
@@ -119,15 +121,20 @@ public class Builder : EditorWindow
         public string path;
         public string name;
     }
-
+    // Styling for title label
+    static GUIStyle _titleStyle;
+    // Used to detect when Unity starts recompiling.
+    static bool _preCompileConfSaved;
     // List of scenes
     static Scene[] _sceneList;
     // List of builds
     static List<BuildConfiguration> _builds;
     // Scrollbar position
     static Vector2 _scrollPosition;
-    // Most recent configuration.
+    // Most recent configuration path.
     static string mostRecentConfiguration;
+    // Most recent configuration name.
+    static string mostRecentConfigurationName;
     // Current sort mode.
     static SortMode _sortMode;
     // Current sort direction.
@@ -135,12 +142,10 @@ public class Builder : EditorWindow
     static EditorWindow window;
     // Default builds options to use when creating a new build configuration.
     static BuildOptions _defaultBuildOptions;
-    // Should we return back to initial configuration after builds completed.
+    // Should we switch back to other configuration when the queue is completed.
     static bool _resetTarget;
-    // Pretty clear?
-    static bool isBuilding;
-    // Small delay after the build. Probably not necessary.
-    static float delayEnd;
+    // Which build target we should switch to at the end.
+    static BuildTarget _switchBackTo;
     // Which configration we are currently iterating.
     static int buildIndex;
     // Well. Timetamp of build.
@@ -174,6 +179,7 @@ public class Builder : EditorWindow
             SaveSettings(SaveMode.AsDefault);
         }
         window = (Builder)EditorWindow.GetWindow(typeof(Builder));
+        window.Repaint();
     }
 
     static void CommandLineBuild()
@@ -217,6 +223,7 @@ public class Builder : EditorWindow
         settings.Add("sortBy", _sortMode);
         settings.Add("sortDirection", _sortDirection);
         settings.Add("resetTarget", _resetTarget);
+        settings.Add("switchBackTo", _switchBackTo);
 
         Dictionary<string, object> build;
         for (int i = 0; i < _builds.Count; i++)
@@ -240,25 +247,34 @@ public class Builder : EditorWindow
             build.Add("uniqueId", bc.uniqueId);
             settings.Add("build" + i, build);
         }
+        string savePath = string.Empty;
         switch (mode)
         {
             case SaveMode.AsDefault:
-                mostRecentConfiguration = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Unity/Nidre/Builder/Default.ini");
+                savePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Unity/Nidre/Builder/Default.ini");
+                mostRecentConfiguration = savePath;
+                mostRecentConfigurationName = Path.GetFileName(mostRecentConfiguration);
                 break;
             case SaveMode.Overwrite:
+                savePath = mostRecentConfiguration;
                 break;
             case SaveMode.SaveAs:
                 string temp = EditorUtility.SaveFilePanel("Save Configuration", Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Unity/Nidre/Builder").ToString(), "", "ini");
                 if (!string.IsNullOrEmpty(mostRecentConfiguration))
                 {
+                    savePath = temp;
                     mostRecentConfiguration = temp;
+                    mostRecentConfigurationName = Path.GetFileName(mostRecentConfiguration);
                 }
+                break;
+            case SaveMode.PreCompile:
+                savePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Unity/Nidre/Builder/PreCompile.ini");
                 break;
         }
 
-        if (!string.IsNullOrEmpty(mostRecentConfiguration))
+        if (!string.IsNullOrEmpty(savePath))
         {
-            using (StreamWriter writer = new StreamWriter(mostRecentConfiguration))
+            using (StreamWriter writer = new StreamWriter(savePath))
             {
                 writer.WriteLine(MiniJSON.Json.Serialize(settings));
             }
@@ -320,6 +336,10 @@ public class Builder : EditorWindow
                     throw new ArgumentException("Arguments missing.", "filePath");
                 }
                 break;
+            case LoadMode.PostCompile:
+                dirPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Unity/Nidre/Builder");
+                filePath = Path.Combine(dirPath, "PreCompile.ini");
+                break;
         }
         string serialized = System.IO.File.ReadAllText(filePath);
 
@@ -333,6 +353,14 @@ public class Builder : EditorWindow
                 _sortMode = (SortMode)Enum.Parse(typeof(SortMode), deserialized["sortBy"] as string);
                 _sortDirection = (SortDirection)Enum.Parse(typeof(SortDirection), deserialized["sortDirection"] as string);
                 _resetTarget = (bool)deserialized["resetTarget"];
+                if (deserialized.ContainsKey("switchBackTo"))
+                {
+                    _switchBackTo = (BuildTarget)Enum.Parse(typeof(BuildTarget), deserialized["switchBackTo"] as string);
+                }
+                else
+                {
+                    _switchBackTo = EditorUserBuildSettings.activeBuildTarget;
+                }
 
                 for (int i = 0; i < _builds.Capacity; i++)
                 {
@@ -365,6 +393,7 @@ public class Builder : EditorWindow
                 ApplySort();
                 serialized = null;
                 mostRecentConfiguration = filePath;
+                mostRecentConfigurationName = Path.GetFileName(mostRecentConfiguration);
             }
             catch (Exception e)
             {
@@ -400,7 +429,7 @@ public class Builder : EditorWindow
                             throw new FileLoadException("Can't read configuration!");
                     }
                 }
-                else Debug.LogException(e);
+                Debug.LogException(e);
             }
         }
         else
@@ -422,6 +451,7 @@ public class Builder : EditorWindow
         settings.Add("sortUtilsToggle", _sortUtilsToggle);
         settings.Add("toolOptionsToggle", _toolOptionsToggle);
         settings.Add("listUtilsToggle", _listUtilsToggle);
+        settings.Add("mostRecentConfiguration", mostRecentConfiguration);
 
         using (StreamWriter writer = new StreamWriter(path))
         {
@@ -458,6 +488,11 @@ public class Builder : EditorWindow
                 _sortUtilsToggle = (bool)deserialized["sortUtilsToggle"];
                 _toolOptionsToggle = (bool)deserialized["toolOptionsToggle"];
                 _listUtilsToggle = (bool)deserialized["listUtilsToggle"];
+                if (deserialized.ContainsKey("mostRecentConfiguration"))
+                {
+                    mostRecentConfiguration = deserialized["mostRecentConfiguration"] as string;
+                    mostRecentConfigurationName = Path.GetFileName(mostRecentConfiguration);
+                }
             }
             catch (Exception e)
             {
@@ -514,10 +549,18 @@ public class Builder : EditorWindow
 
     void OnGUI()
     {
-        if (!isBuilding && (Time.realtimeSinceStartup > delayEnd) && !UnityEditor.BuildPipeline.isBuildingPlayer)
+        if (!UnityEditor.BuildPipeline.isBuildingPlayer)
         {
             if (_builds != null)
             {
+                //Create a title style if we haven't already.
+                //Calling this piece of code outside of OnGUI throws an exception. That's why we do it here.
+                if (_titleStyle == null)
+                {
+                    _titleStyle = new GUIStyle(EditorStyles.boldLabel);
+                    _titleStyle.alignment = TextAnchor.MiddleCenter;
+                }
+                EditorGUILayout.SelectableLabel(mostRecentConfigurationName, _titleStyle, GUILayout.Height(20));
                 #region BuilderUtils
                 EditorGUILayout.BeginHorizontal();
                 if (GUILayout.Button("Save", EditorStyles.miniButtonLeft))
@@ -527,6 +570,7 @@ public class Builder : EditorWindow
                 if (GUILayout.Button("Load", EditorStyles.miniButtonRight))
                 {
                     LoadSettings(LoadMode.AskForPath);
+                    Repaint();
                 }
                 EditorGUILayout.Space();
                 if (GUILayout.Button("Save as Default", EditorStyles.miniButtonLeft))
@@ -540,6 +584,7 @@ public class Builder : EditorWindow
                 if (GUILayout.Button("Load Default", EditorStyles.miniButtonRight))
                 {
                     LoadSettings(LoadMode.Default);
+                    Repaint();
                 }
                 GUILayout.FlexibleSpace();
                 if (GUILayout.Button("Refresh Scenes", EditorStyles.miniButton))
@@ -572,9 +617,15 @@ public class Builder : EditorWindow
                 bool prevToggle = _toolOptionsToggle;
                 _toolOptionsToggle = EditorGUILayout.Foldout(_toolOptionsToggle, "Tool Options");
                 if (!prevToggle.Equals(_toolOptionsToggle)) SaveToolSettings();
+
                 if (_toolOptionsToggle)
                 {
-                    _resetTarget = EditorGUILayout.ToggleLeft("Switch to " + EditorUserBuildSettings.activeBuildTarget + "(Current) when completed.", _resetTarget);
+                    EditorGUILayout.BeginHorizontal();
+                    _resetTarget = EditorGUILayout.ToggleLeft("Switch to ", _resetTarget, GUILayout.Width(75));
+                    _switchBackTo = (BuildTarget)EditorGUILayout.EnumPopup(_switchBackTo, GUILayout.MaxWidth(150));
+                    EditorGUILayout.LabelField(" when completed.");
+                    GUILayout.FlexibleSpace();
+                    EditorGUILayout.EndHorizontal();
                 }
 
                 EditorGUILayout.Space();
@@ -765,7 +816,6 @@ public class Builder : EditorWindow
                 EditorGUILayout.EndHorizontal();
                 if (GUILayout.Button("Start Build", GUILayout.Width(100)))
                 {
-                    isBuilding = true;
                     SelectBuildPath();
                     EditorGUILayout.EndScrollView();
                     Build();
@@ -822,7 +872,6 @@ public class Builder : EditorWindow
         if (GUILayout.Button("Copy", EditorStyles.miniButtonMid, GUILayout.Width(40)))
         {
             BuildConfiguration bc = _builds[i].Copy();
-            string initialID = bc.uniqueId;
             int index = 0;
             while (index < _builds.Count - 1)
             {
@@ -846,7 +895,6 @@ public class Builder : EditorWindow
         if (GUILayout.Button("+", EditorStyles.miniButtonLeft, GUILayout.Width(25)))
         {
             BuildConfiguration bc = new BuildConfiguration();
-            string initialID = bc.uniqueId;
             int index = 0;
             while (index < _builds.Count - 1)
             {
@@ -1022,8 +1070,36 @@ public class Builder : EditorWindow
             if (!EditorUserBuildSettings.activeBuildTarget.Equals(_initBuildTarget)) EditorUserBuildSettings.SwitchActiveBuildTarget(_initBuildTarget);
         }
         _toBeBuild.Clear();
-        isBuilding = false;
-        delayEnd = Time.realtimeSinceStartup + 5;
     }
 
+    void Update()
+    {
+        //Check if Editor started compilation
+        if (EditorApplication.isCompiling)
+        {
+            //Save current settings if we haven't already.
+            if (!_preCompileConfSaved)
+            {
+                SaveToolSettings();
+                SaveSettings(SaveMode.PreCompile);
+                _preCompileConfSaved = true;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Reload recent settings when script recompile finishes.
+    /// </summary>
+    [UnityEditor.Callbacks.DidReloadScripts]
+    public static void OnCompileScripts()
+    {
+        if (_builds != null) _builds.Clear();
+        //Load scenes
+        RefreshSceneList();
+        _preCompileConfSaved = false;
+        LoadSettings(LoadMode.PostCompile);
+        LoadToolSettings();
+        window = (Builder)EditorWindow.GetWindow(typeof(Builder));
+        window.Repaint();
+    }
 }
