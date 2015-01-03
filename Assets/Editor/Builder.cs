@@ -209,6 +209,20 @@ public class Builder : EditorWindow
             temp.Add(sceneObj);
         }
         _sceneList = temp.OrderBy(scene => scene.name).ToArray();
+        if (_builds != null)
+        {
+            for (int i = 0; i < _builds.Count; i++)
+            {
+                for (int j = 0; j < _builds[i].scenes.Count; j++)
+                {
+                    if (!_sceneList.Contains(_builds[i].scenes[j]))
+                    {
+                        _builds[i].scenes.RemoveAt(j);
+                        j--;
+                    }
+                }
+            }
+        }
     }
 
     /// <summary>
@@ -921,7 +935,6 @@ public class Builder : EditorWindow
     /// </summary>
     static void Build()
     {
-        BuildTarget _initBuildTarget = EditorUserBuildSettings.activeBuildTarget;
         List<BuildConfiguration> _toBeBuild = new List<BuildConfiguration>();
         _toBeBuild.AddRange(_builds.ToArray());
 
@@ -934,10 +947,10 @@ public class Builder : EditorWindow
             if (_resetTarget)
             {
                 //If the current target is as same as initial target.
-                if (bc.target.Equals(_initBuildTarget))
+                if (bc.target.Equals(_switchBackTo))
                 {
                     //If there are other build targets
-                    if (_toBeBuild.Count(build => build.target != _initBuildTarget) > 0)
+                    if (_toBeBuild.Count(build => build.target != _switchBackTo) > 0)
                     {
                         //Add current item to the end of the list and skip to next item.
                         _toBeBuild.Add(bc);
@@ -1055,7 +1068,11 @@ public class Builder : EditorWindow
 
                 Debug.Log("Building...");
                 Debug.Log("Path : " + buildPath);
-                BuildPipeline.BuildPlayer(scenePaths, buildPath, bc.target, bc.options);
+                string buildMessage = BuildPipeline.BuildPlayer(scenePaths, buildPath, bc.target, bc.options);
+                if (!string.IsNullOrEmpty(buildMessage))
+                {
+                    Debug.LogError("Build Failed : " + buildMessage);
+                }
 
                 Debug.Log(bc.name + " Done. (" + sw.ElapsedMilliseconds + "ms)");
                 sw.Stop();
@@ -1067,7 +1084,7 @@ public class Builder : EditorWindow
         //Switch to initial target if needed.
         if (_resetTarget)
         {
-            if (!EditorUserBuildSettings.activeBuildTarget.Equals(_initBuildTarget)) EditorUserBuildSettings.SwitchActiveBuildTarget(_initBuildTarget);
+            if (!EditorUserBuildSettings.activeBuildTarget.Equals(_switchBackTo)) EditorUserBuildSettings.SwitchActiveBuildTarget(_switchBackTo);
         }
         _toBeBuild.Clear();
     }
