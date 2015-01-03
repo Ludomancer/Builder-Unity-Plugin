@@ -116,11 +116,67 @@ public class Builder : EditorWindow
 
     // Holds scene information
     [Serializable]
-    struct Scene
+    class Scene
     {
-        public string path;
-        public string name;
+        public Scene(string path)
+        {
+            Path = path;
+        }
+
+        internal int Id;
+        private string _path;
+
+        public string Path
+        {
+            get { return _path; }
+            set 
+            { 
+                _path = value;
+                _name = System.IO.Path.GetFileNameWithoutExtension(value);
+                Id = _path.GetHashCode();
+            }
+        }
+        private string _name;
+
+        public string Name
+        {
+            get { return _name; }
+        }
+        public bool isFound = true;
+
+        public override bool Equals(object other)
+        {
+            return Equals(other as Scene);
+        }
+
+        public virtual bool Equals(Scene other)
+        {
+            if (other == null) { return false; }
+            if (object.ReferenceEquals(this, other)) { return true; }
+            return this.Id == other.Id;
+        }
+
+        public override int GetHashCode()
+        {
+            return this.Id;
+        }
+
+        public static bool operator ==(Scene item1, Scene item2)
+        {
+            if (object.ReferenceEquals(item1, item2)) { return true; }
+            if ((object)item1 == null || (object)item2 == null) { return false; }
+            return item1.Id == item2.Id;
+        }
+
+        public static bool operator !=(Scene item1, Scene item2)
+        {
+            return !(item1 == item2);
+        }
+
     }
+    // Styling for missing scenes
+    static GUIStyle _missingSceneFoldoutStyle;
+    static GUIStyle _missingSceneStyle;
     // Styling for title label
     static GUIStyle _titleStyle;
     // Used to detect when Unity starts recompiling.
@@ -164,8 +220,6 @@ public class Builder : EditorWindow
     static void ShowWindow()
     {
         if (_builds != null) _builds.Clear();
-        //Load scenes
-        RefreshSceneList();
 
         //Load settings and default configuration
         LoadToolSettings();
@@ -178,6 +232,10 @@ public class Builder : EditorWindow
             _builds.Add(new BuildConfiguration());
             SaveSettings(SaveMode.AsDefault);
         }
+
+        //Load scenes
+        RefreshSceneList();
+
         window = (Builder)EditorWindow.GetWindow(typeof(Builder));
         window.Repaint();
     }
@@ -196,19 +254,18 @@ public class Builder : EditorWindow
     /// </summary>
     static void RefreshSceneList()
     {
+        //Load all scenes specified in EditorBuildSettings 
         List<Scene> temp = new List<Scene>();
         foreach (UnityEditor.EditorBuildSettingsScene scene in UnityEditor.EditorBuildSettings.scenes)
         {
             string sceneName = scene.path.Substring(scene.path.LastIndexOf('/') + 1);
             sceneName = sceneName.Substring(0, sceneName.Length - 6);
-            Scene sceneObj = new Scene()
-            {
-                path = scene.path,
-                name = sceneName
-            };
+            Scene sceneObj = new Scene(scene.path);
             temp.Add(sceneObj);
         }
-        _sceneList = temp.OrderBy(scene => scene.name).ToArray();
+        _sceneList = temp.OrderBy(scene => scene.Name).ToArray();
+
+        //Check if there any missing scenes or if any missing scene is recovered.
         if (_builds != null)
         {
             for (int i = 0; i < _builds.Count; i++)
@@ -217,9 +274,10 @@ public class Builder : EditorWindow
                 {
                     if (!_sceneList.Contains(_builds[i].scenes[j]))
                     {
-                        _builds[i].scenes.RemoveAt(j);
-                        j--;
+                        Debug.LogError("Missing Scene : " + _builds[i].scenes[j].Name + "," + _builds[i].scenes[j].Path);
+                        _builds[i].scenes[j].isFound = false;
                     }
+                    else _builds[i].scenes[j].isFound = true;
                 }
             }
         }
@@ -249,7 +307,7 @@ public class Builder : EditorWindow
             string[] scenePaths = new string[bc.scenes.Count];
             for (int p = 0; p < bc.scenes.Count; p++)
             {
-                scenePaths[p] = bc.scenes[p].path;
+                scenePaths[p] = bc.scenes[p].Path;
             }
 
             build.Add("scenes", scenePaths);
@@ -382,17 +440,9 @@ public class Builder : EditorWindow
                     Dictionary<string, object> buildConf = deserialized["build" + i] as Dictionary<string, object>;
                     List<object> temp = buildConf["scenes"] as List<object>;
                     bc.scenes = new List<Scene>();
-                    foreach (var item in temp)
+                    foreach (string scenePath in temp)
                     {
-                        string scenePath = item as string;
-                        string sceneName = scenePath.Substring(scenePath.LastIndexOf('/') + 1);
-                        sceneName = sceneName.Substring(0, sceneName.Length - 6);
-                        Scene newScene = new Scene()
-                        {
-                            path = scenePath,
-                            name = sceneName
-
-                        };
+                        Scene newScene = new Scene(scenePath);
                         bc.scenes.Add(newScene);
                     }
                     bc.name = buildConf["name"] as string;
@@ -567,6 +617,7 @@ public class Builder : EditorWindow
         {
             if (_builds != null)
             {
+                #region PrepareGuiStyles
                 //Create a title style if we haven't already.
                 //Calling this piece of code outside of OnGUI throws an exception. That's why we do it here.
                 if (_titleStyle == null)
@@ -574,7 +625,37 @@ public class Builder : EditorWindow
                     _titleStyle = new GUIStyle(EditorStyles.boldLabel);
                     _titleStyle.alignment = TextAnchor.MiddleCenter;
                 }
+                //Create a missing scene style if we haven't already.
+                if (_missingSceneStyle == null)
+                {
+                    _missingSceneStyle = new GUIStyle(EditorStyles.label);
+                    _missingSceneStyle.focused.textColor = Color.red;
+                    _missingSceneStyle.normal.textColor = Color.red;
+                    _missingSceneStyle.active.textColor = Color.red;
+                    _missingSceneStyle.hover.textColor = Color.red;
+                    _missingSceneStyle.onFocused.textColor = Color.red;
+                    _missingSceneStyle.onNormal.textColor = Color.red;
+                    _missingSceneStyle.onActive.textColor = Color.red;
+                    _missingSceneStyle.onHover.textColor = Color.red;
+                }
+                //Create a missing scene style for foldouts if we haven't already.
+                if (_missingSceneFoldoutStyle == null)
+                {
+                    _missingSceneFoldoutStyle = new GUIStyle(EditorStyles.foldout);
+                    _missingSceneFoldoutStyle.focused.textColor = Color.red;
+                    _missingSceneFoldoutStyle.normal.textColor = Color.red;
+                    _missingSceneFoldoutStyle.active.textColor = Color.red;
+                    _missingSceneFoldoutStyle.hover.textColor = Color.red;
+                    _missingSceneFoldoutStyle.onFocused.textColor = Color.red;
+                    _missingSceneFoldoutStyle.onNormal.textColor = Color.red;
+                    _missingSceneFoldoutStyle.onActive.textColor = Color.red;
+                    _missingSceneFoldoutStyle.onHover.textColor = Color.red;
+                } 
+                #endregion
                 EditorGUILayout.SelectableLabel(mostRecentConfigurationName, _titleStyle, GUILayout.Height(20));
+
+                _scrollPosition = EditorGUILayout.BeginScrollView(_scrollPosition);
+
                 #region BuilderUtils
                 EditorGUILayout.BeginHorizontal();
                 if (GUILayout.Button("Save", EditorStyles.miniButtonLeft))
@@ -584,6 +665,7 @@ public class Builder : EditorWindow
                 if (GUILayout.Button("Load", EditorStyles.miniButtonRight))
                 {
                     LoadSettings(LoadMode.AskForPath);
+                    RefreshSceneList();
                     Repaint();
                 }
                 EditorGUILayout.Space();
@@ -598,6 +680,7 @@ public class Builder : EditorWindow
                 if (GUILayout.Button("Load Default", EditorStyles.miniButtonRight))
                 {
                     LoadSettings(LoadMode.Default);
+                    RefreshSceneList();
                     Repaint();
                 }
                 GUILayout.FlexibleSpace();
@@ -722,7 +805,6 @@ public class Builder : EditorWindow
 
                 EditorGUILayout.LabelField("Build Queue", EditorStyles.boldLabel, null);
 
-                _scrollPosition = EditorGUILayout.BeginScrollView(_scrollPosition);
                 isScrollAlive = true;
                 for (int i = 0; i < _builds.Count; i++)
                 {
@@ -733,10 +815,10 @@ public class Builder : EditorWindow
                     if (bc.scenes.Count > 0)
                     {
                         selectedScenes = "(";
-                        bc.scenes = bc.scenes.OrderBy(scene => scene.name).ToList();
+                        bc.scenes = bc.scenes.OrderBy(scene => scene.Name).ToList();
                         for (int s = 0; s < bc.scenes.Count; s++)
                         {
-                            selectedScenes += bc.scenes[s].name;
+                            selectedScenes += bc.scenes[s].Name;
                             if (s < bc.scenes.Count - 1)
                             {
                                 selectedScenes += ",";
@@ -751,7 +833,8 @@ public class Builder : EditorWindow
                     Rect r = GUILayoutUtility.GetLastRect();
                     r.width = 65;
                     r.x += 15;
-                    bc.toggle = EditorGUI.Foldout(r, bc.toggle, bc.uniqueId, true);
+                    if (bc.scenes.Count(item => !item.isFound) > 0) bc.toggle = EditorGUI.Foldout(r, bc.toggle, bc.uniqueId, true, _missingSceneFoldoutStyle);
+                    else bc.toggle = EditorGUI.Foldout(r, bc.toggle, bc.uniqueId, true);
 
                     GUILayout.Space(65);
                     bc.name = EditorGUILayout.TextField(bc.name);
@@ -789,7 +872,7 @@ public class Builder : EditorWindow
                         {
                             for (int k = 0; k < _sceneList.Length; k++)
                             {
-                                if (EditorGUILayout.ToggleLeft(_sceneList[k].name, bc.scenes.Contains(_sceneList[k])))
+                                if (EditorGUILayout.ToggleLeft(_sceneList[k].Name, bc.scenes.Contains(_sceneList[k])))
                                 {
                                     if (!bc.scenes.Contains(_sceneList[k]))
                                     {
@@ -801,6 +884,24 @@ public class Builder : EditorWindow
                                     bc.scenes.Remove(_sceneList[k]);
                                 }
                             }
+
+                            for (int k = 0; k < bc.scenes.Count; k++)
+                            {
+                                if (!bc.scenes[k].isFound)
+                                {
+                                    EditorGUILayout.BeginHorizontal();
+                                    EditorGUILayout.LabelField(bc.scenes[k].Name, _missingSceneStyle);
+                                    if (GUILayout.Button("Locate", EditorStyles.miniButton, GUILayout.Width(75)))
+                                    {
+                                        string file = EditorUtility.OpenFilePanel("Locate " + bc.scenes[k].Name, Application.dataPath, "unity");
+                                        file = "Assets" + file.Replace(Application.dataPath, "");
+                                        bc.scenes[k].Path = file;
+                                        bc.scenes[k].isFound = true;
+                                    }
+                                    GUILayout.FlexibleSpace();
+                                    EditorGUILayout.EndHorizontal();
+                                }
+                            }
                         }
                         EditorGUILayout.EndVertical();
                         #endregion
@@ -810,6 +911,7 @@ public class Builder : EditorWindow
                 }
 
                 #region Build
+                //Disable build button if there are no enabled builds.
                 GUI.enabled = _builds.Count(build => build.enabled == true) > 0;
 
                 EditorGUILayout.BeginHorizontal();
@@ -828,7 +930,12 @@ public class Builder : EditorWindow
 
                 if (GUILayout.Button("Browse", EditorStyles.miniButtonRight, GUILayout.Width(100))) { EditorUtility.RevealInFinder(_mainBuildPath); }
                 EditorGUILayout.EndHorizontal();
-                if (GUILayout.Button("Start Build", GUILayout.Width(100)))
+
+                EditorGUILayout.BeginHorizontal();
+                float buildButtonSize = 100;
+                //Center build button.
+                GUILayout.Space(window.position.width * 0.5f - buildButtonSize * 0.5f);
+                if (GUILayout.Button("Start Build", GUILayout.Width(buildButtonSize)))
                 {
                     SelectBuildPath();
                     EditorGUILayout.EndScrollView();
@@ -836,7 +943,8 @@ public class Builder : EditorWindow
                     isScrollAlive = false;
                     return;
                 }
-                GUILayout.FlexibleSpace();
+                EditorGUILayout.EndHorizontal();
+
                 GUI.enabled = true;
                 #endregion
 
@@ -962,6 +1070,7 @@ public class Builder : EditorWindow
 
             if (!bc.enabled) { Debug.Log(bc.name + " " + bc.uniqueId + " is Disabled. Skipped."); _toBeBuild.RemoveAt(0); }
             else if (bc.scenes.Count == 0) { Debug.Log(bc.name + " " + bc.uniqueId + " has no Scenes added. Skipped."); _toBeBuild.RemoveAt(0); }
+            else if (bc.scenes.Count(scene => !scene.isFound) > 0) { Debug.Log(bc.name + " " + bc.uniqueId + " has missing Scenes. Skipped."); _toBeBuild.RemoveAt(0); }
             else
             {
                 Debug.Log(bc.name + " Started...");
@@ -1063,7 +1172,7 @@ public class Builder : EditorWindow
                 string[] scenePaths = new string[bc.scenes.Count];
                 for (int p = 0; p < bc.scenes.Count; p++)
                 {
-                    scenePaths[p] = bc.scenes[p].path;
+                    scenePaths[p] = bc.scenes[p].Path;
                 }
 
                 Debug.Log("Building...");
@@ -1111,11 +1220,11 @@ public class Builder : EditorWindow
     public static void OnCompileScripts()
     {
         if (_builds != null) _builds.Clear();
-        //Load scenes
-        RefreshSceneList();
         _preCompileConfSaved = false;
         LoadSettings(LoadMode.PostCompile);
         LoadToolSettings();
+        //Load scenes
+        RefreshSceneList();
         window = (Builder)EditorWindow.GetWindow(typeof(Builder));
         window.Repaint();
     }
