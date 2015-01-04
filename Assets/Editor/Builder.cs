@@ -72,55 +72,13 @@ public class Builder : EditorWindow
         Descending
     }
 
-    // Holds a single build configuration.
-    [Serializable]
-    class BuildConfiguration
-    {
-        public BuildConfiguration()
-        {
-            this.options = _defaultBuildOptions;
-            this.uniqueId = UnityEngine.Random.Range(0, 1000000).ToString("000000");
-        }
-
-        public BuildConfiguration(BuildTarget target, BuildOptions options)
-        {
-            this.target = target;
-            this.options = options;
-            this.uniqueId = UnityEngine.Random.Range(0, 1000000).ToString("000000");
-        }
-
-        public BuildConfiguration Copy()
-        {
-            BuildConfiguration bc = new BuildConfiguration();
-            bc.options = options;
-            bc.target = target;
-            bc.scenes = scenes;
-            bc.scenesToggle = scenesToggle;
-            bc.enabled = enabled;
-            bc.name = name;
-            return bc;
-        }
-
-        public BuildOptions options = BuildOptions.None;
-        public BuildTarget target = BuildTarget.Android;
-        public List<Scene> scenes = new List<Scene>();
-        public bool scenesToggle = true;
-        public bool toggle = true;
-        public bool enabled = true;
-        public string name = "No Name";
-        public string uniqueId;
-    }
-
     // Folder to output our builds.
     static string _mainBuildPath;
-
-    // Holds scene information
-    [Serializable]
-    struct Scene
-    {
-        public string path;
-        public string name;
-    }
+    // Default GUI color
+    static Color _defaultGuiColor = Color.clear;
+    // Styling for missing scenes
+    static GUIStyle _missingSceneFoldoutStyle;
+    static GUIStyle _missingSceneStyle;
     // Styling for title label
     static GUIStyle _titleStyle;
     // Used to detect when Unity starts recompiling.
@@ -142,6 +100,8 @@ public class Builder : EditorWindow
     static EditorWindow window;
     // Default builds options to use when creating a new build configuration.
     static BuildOptions _defaultBuildOptions;
+    // Default define symbols to use when creating a new build configuration.
+    static string _defaultDefineSymbols;
     // Should we switch back to other configuration when the queue is completed.
     static bool _resetTarget;
     // Which build target we should switch to at the end.
@@ -164,8 +124,6 @@ public class Builder : EditorWindow
     static void ShowWindow()
     {
         if (_builds != null) _builds.Clear();
-        //Load scenes
-        RefreshSceneList();
 
         //Load settings and default configuration
         LoadToolSettings();
@@ -175,9 +133,13 @@ public class Builder : EditorWindow
         if (_builds == null)
         {
             _builds = new List<BuildConfiguration>();
-            _builds.Add(new BuildConfiguration());
+            _builds.Add(new BuildConfiguration(_defaultBuildOptions, _defaultDefineSymbols));
             SaveSettings(SaveMode.AsDefault);
         }
+
+        //Load scenes
+        RefreshSceneList();
+
         window = (Builder)EditorWindow.GetWindow(typeof(Builder));
         window.Repaint();
     }
@@ -196,19 +158,18 @@ public class Builder : EditorWindow
     /// </summary>
     static void RefreshSceneList()
     {
+        //Load all scenes specified in EditorBuildSettings 
         List<Scene> temp = new List<Scene>();
         foreach (UnityEditor.EditorBuildSettingsScene scene in UnityEditor.EditorBuildSettings.scenes)
         {
             string sceneName = scene.path.Substring(scene.path.LastIndexOf('/') + 1);
             sceneName = sceneName.Substring(0, sceneName.Length - 6);
-            Scene sceneObj = new Scene()
-            {
-                path = scene.path,
-                name = sceneName
-            };
+            Scene sceneObj = new Scene(scene.path);
             temp.Add(sceneObj);
         }
-        _sceneList = temp.OrderBy(scene => scene.name).ToArray();
+        _sceneList = temp.OrderBy(scene => scene.Name).ToArray();
+
+        //Check if there any missing scenes or if any missing scene is recovered.
         if (_builds != null)
         {
             for (int i = 0; i < _builds.Count; i++)
@@ -217,9 +178,10 @@ public class Builder : EditorWindow
                 {
                     if (!_sceneList.Contains(_builds[i].scenes[j]))
                     {
-                        _builds[i].scenes.RemoveAt(j);
-                        j--;
+                        Debug.LogError("Missing Scene : " + _builds[i].scenes[j].Name + "," + _builds[i].scenes[j].Path);
+                        _builds[i].scenes[j].isFound = false;
                     }
+                    else _builds[i].scenes[j].isFound = true;
                 }
             }
         }
@@ -238,6 +200,8 @@ public class Builder : EditorWindow
         settings.Add("sortDirection", _sortDirection);
         settings.Add("resetTarget", _resetTarget);
         settings.Add("switchBackTo", _switchBackTo);
+        settings.Add("defaultBuildOptions", _defaultBuildOptions);
+        settings.Add("defaultDefineSymbols", _defaultDefineSymbols);
 
         Dictionary<string, object> build;
         for (int i = 0; i < _builds.Count; i++)
@@ -249,7 +213,7 @@ public class Builder : EditorWindow
             string[] scenePaths = new string[bc.scenes.Count];
             for (int p = 0; p < bc.scenes.Count; p++)
             {
-                scenePaths[p] = bc.scenes[p].path;
+                scenePaths[p] = bc.scenes[p].Path;
             }
 
             build.Add("scenes", scenePaths);
@@ -259,6 +223,7 @@ public class Builder : EditorWindow
             build.Add("toggle", bc.toggle);
             build.Add("enabled", bc.enabled);
             build.Add("uniqueId", bc.uniqueId);
+            build.Add("customDefineSymbols", bc.customDefineSymbols);
             settings.Add("build" + i, build);
         }
         string savePath = string.Empty;
@@ -295,11 +260,7 @@ public class Builder : EditorWindow
         }
         else
         {
-            if (EditorUtility.DisplayDialog("Can't save configuration!", "Invalid file path", "Cancel", "Retry"))
-            {
-
-            }
-            else
+            if (!EditorUtility.DisplayDialog("Can't save configuration!", "Invalid file path", "Cancel", "Retry"))
             {
                 SaveSettings(mode);
             }
@@ -327,7 +288,7 @@ public class Builder : EditorWindow
                     File.Create(filePath).Close();
                     _mainBuildPath = null;
                     _builds = new List<BuildConfiguration>();
-                    _builds.Add(new BuildConfiguration());
+                    _builds.Add(new BuildConfiguration(_defaultBuildOptions, _defaultDefineSymbols));
                     SaveSettings(SaveMode.AsDefault);
                 }
                 break;
@@ -367,6 +328,17 @@ public class Builder : EditorWindow
                 _sortMode = (SortMode)Enum.Parse(typeof(SortMode), deserialized["sortBy"] as string);
                 _sortDirection = (SortDirection)Enum.Parse(typeof(SortDirection), deserialized["sortDirection"] as string);
                 _resetTarget = (bool)deserialized["resetTarget"];
+
+                if (deserialized.ContainsKey("defaultBuildOptions"))
+                {
+                    _defaultBuildOptions = (BuildOptions)Enum.Parse(typeof(BuildOptions), deserialized["defaultBuildOptions"] as string);
+                }
+
+                if (deserialized.ContainsKey("defaultDefineSymbols"))
+                {
+                    _defaultDefineSymbols = deserialized["defaultDefineSymbols"] as string;
+                }
+
                 if (deserialized.ContainsKey("switchBackTo"))
                 {
                     _switchBackTo = (BuildTarget)Enum.Parse(typeof(BuildTarget), deserialized["switchBackTo"] as string);
@@ -378,21 +350,13 @@ public class Builder : EditorWindow
 
                 for (int i = 0; i < _builds.Capacity; i++)
                 {
-                    BuildConfiguration bc = new BuildConfiguration();
+                    BuildConfiguration bc = new BuildConfiguration(_defaultBuildOptions, _defaultDefineSymbols);
                     Dictionary<string, object> buildConf = deserialized["build" + i] as Dictionary<string, object>;
                     List<object> temp = buildConf["scenes"] as List<object>;
                     bc.scenes = new List<Scene>();
-                    foreach (var item in temp)
+                    foreach (string scenePath in temp)
                     {
-                        string scenePath = item as string;
-                        string sceneName = scenePath.Substring(scenePath.LastIndexOf('/') + 1);
-                        sceneName = sceneName.Substring(0, sceneName.Length - 6);
-                        Scene newScene = new Scene()
-                        {
-                            path = scenePath,
-                            name = sceneName
-
-                        };
+                        Scene newScene = new Scene(scenePath);
                         bc.scenes.Add(newScene);
                     }
                     bc.name = buildConf["name"] as string;
@@ -402,6 +366,10 @@ public class Builder : EditorWindow
                     bc.toggle = (bool)buildConf["toggle"];
                     bc.enabled = (bool)buildConf["enabled"];
                     bc.uniqueId = int.Parse(buildConf["uniqueId"] as string).ToString("000000");
+                    if (buildConf.ContainsKey("customDefineSymbols"))
+                    {
+                        bc.customDefineSymbols = buildConf["customDefineSymbols"] as string;
+                    }
                     _builds.Add(bc);
                 }
                 ApplySort();
@@ -425,7 +393,7 @@ public class Builder : EditorWindow
                             if (dialogResult == 1)
                             {
                                 _builds = new List<BuildConfiguration>();
-                                _builds.Add(new BuildConfiguration());
+                                _builds.Add(new BuildConfiguration(_defaultBuildOptions, _defaultDefineSymbols));
                                 SaveSettings(SaveMode.AsDefault);
                             }
                             else if (dialogResult == 2)
@@ -461,7 +429,6 @@ public class Builder : EditorWindow
 
         Dictionary<string, object> settings = new Dictionary<string, object>();
 
-        settings.Add("defaultBuildOptions", _defaultBuildOptions);
         settings.Add("sortUtilsToggle", _sortUtilsToggle);
         settings.Add("toolOptionsToggle", _toolOptionsToggle);
         settings.Add("listUtilsToggle", _listUtilsToggle);
@@ -498,7 +465,6 @@ public class Builder : EditorWindow
             Dictionary<string, object> deserialized = MiniJSON.Json.Deserialize(serialized) as Dictionary<string, object>;
             try
             {
-                _defaultBuildOptions = (BuildOptions)Enum.Parse(typeof(BuildOptions), deserialized["defaultBuildOptions"] as string);
                 _sortUtilsToggle = (bool)deserialized["sortUtilsToggle"];
                 _toolOptionsToggle = (bool)deserialized["toolOptionsToggle"];
                 _listUtilsToggle = (bool)deserialized["listUtilsToggle"];
@@ -533,7 +499,7 @@ public class Builder : EditorWindow
         _builds = null;
         _mainBuildPath = null;
         _builds = new List<BuildConfiguration>();
-        _builds.Add(new BuildConfiguration());
+        _builds.Add(new BuildConfiguration(_defaultBuildOptions, _defaultDefineSymbols));
         SaveSettings(SaveMode.AsDefault);
         _defaultBuildOptions = BuildOptions.None;
         SaveToolSettings();
@@ -567,6 +533,7 @@ public class Builder : EditorWindow
         {
             if (_builds != null)
             {
+                #region PrepareGuiStyles
                 //Create a title style if we haven't already.
                 //Calling this piece of code outside of OnGUI throws an exception. That's why we do it here.
                 if (_titleStyle == null)
@@ -574,7 +541,41 @@ public class Builder : EditorWindow
                     _titleStyle = new GUIStyle(EditorStyles.boldLabel);
                     _titleStyle.alignment = TextAnchor.MiddleCenter;
                 }
+                //Create a missing scene style if we haven't already.
+                if (_missingSceneStyle == null)
+                {
+                    _missingSceneStyle = new GUIStyle(EditorStyles.label);
+                    _missingSceneStyle.focused.textColor = Color.red;
+                    _missingSceneStyle.normal.textColor = Color.red;
+                    _missingSceneStyle.active.textColor = Color.red;
+                    _missingSceneStyle.hover.textColor = Color.red;
+                    _missingSceneStyle.onFocused.textColor = Color.red;
+                    _missingSceneStyle.onNormal.textColor = Color.red;
+                    _missingSceneStyle.onActive.textColor = Color.red;
+                    _missingSceneStyle.onHover.textColor = Color.red;
+                }
+                //Create a missing scene style for foldouts if we haven't already.
+                if (_missingSceneFoldoutStyle == null)
+                {
+                    _missingSceneFoldoutStyle = new GUIStyle(EditorStyles.foldout);
+                    _missingSceneFoldoutStyle.focused.textColor = Color.red;
+                    _missingSceneFoldoutStyle.normal.textColor = Color.red;
+                    _missingSceneFoldoutStyle.active.textColor = Color.red;
+                    _missingSceneFoldoutStyle.hover.textColor = Color.red;
+                    _missingSceneFoldoutStyle.onFocused.textColor = Color.red;
+                    _missingSceneFoldoutStyle.onNormal.textColor = Color.red;
+                    _missingSceneFoldoutStyle.onActive.textColor = Color.red;
+                    _missingSceneFoldoutStyle.onHover.textColor = Color.red;
+                }
+                if (_defaultGuiColor.Equals(Color.clear))
+                {
+                    _defaultGuiColor = GUI.color;
+                }
+                #endregion
                 EditorGUILayout.SelectableLabel(mostRecentConfigurationName, _titleStyle, GUILayout.Height(20));
+
+                _scrollPosition = EditorGUILayout.BeginScrollView(_scrollPosition);
+
                 #region BuilderUtils
                 EditorGUILayout.BeginHorizontal();
                 if (GUILayout.Button("Save", EditorStyles.miniButtonLeft))
@@ -584,6 +585,7 @@ public class Builder : EditorWindow
                 if (GUILayout.Button("Load", EditorStyles.miniButtonRight))
                 {
                     LoadSettings(LoadMode.AskForPath);
+                    RefreshSceneList();
                     Repaint();
                 }
                 EditorGUILayout.Space();
@@ -598,6 +600,7 @@ public class Builder : EditorWindow
                 if (GUILayout.Button("Load Default", EditorStyles.miniButtonRight))
                 {
                     LoadSettings(LoadMode.Default);
+                    RefreshSceneList();
                     Repaint();
                 }
                 GUILayout.FlexibleSpace();
@@ -711,7 +714,7 @@ public class Builder : EditorWindow
                     if (GUILayout.Button("Clear", EditorStyles.miniButton))
                     {
                         _builds.Clear();
-                        _builds.Add(new BuildConfiguration());
+                        _builds.Add(new BuildConfiguration(_defaultBuildOptions, _defaultDefineSymbols));
                     }
                     EditorGUILayout.EndHorizontal();
                 }
@@ -722,7 +725,6 @@ public class Builder : EditorWindow
 
                 EditorGUILayout.LabelField("Build Queue", EditorStyles.boldLabel, null);
 
-                _scrollPosition = EditorGUILayout.BeginScrollView(_scrollPosition);
                 isScrollAlive = true;
                 for (int i = 0; i < _builds.Count; i++)
                 {
@@ -733,10 +735,10 @@ public class Builder : EditorWindow
                     if (bc.scenes.Count > 0)
                     {
                         selectedScenes = "(";
-                        bc.scenes = bc.scenes.OrderBy(scene => scene.name).ToList();
+                        bc.scenes = bc.scenes.OrderBy(scene => scene.Name).ToList();
                         for (int s = 0; s < bc.scenes.Count; s++)
                         {
-                            selectedScenes += bc.scenes[s].name;
+                            selectedScenes += bc.scenes[s].Name;
                             if (s < bc.scenes.Count - 1)
                             {
                                 selectedScenes += ",";
@@ -751,7 +753,8 @@ public class Builder : EditorWindow
                     Rect r = GUILayoutUtility.GetLastRect();
                     r.width = 65;
                     r.x += 15;
-                    bc.toggle = EditorGUI.Foldout(r, bc.toggle, bc.uniqueId, true);
+                    if (bc.scenes.Count(item => !item.isFound) > 0) bc.toggle = EditorGUI.Foldout(r, bc.toggle, bc.uniqueId, true, _missingSceneFoldoutStyle);
+                    else bc.toggle = EditorGUI.Foldout(r, bc.toggle, bc.uniqueId, true);
 
                     GUILayout.Space(65);
                     bc.name = EditorGUILayout.TextField(bc.name);
@@ -771,12 +774,30 @@ public class Builder : EditorWindow
 
                         EditorGUI.indentLevel++;
                         EditorGUILayout.BeginHorizontal();
-                        EditorGUILayout.LabelField("Build Options", GUILayout.Width(90));
+                        EditorGUILayout.LabelField("Build Options", GUILayout.Width(125));
                         bc.options = (BuildOptions)EditorGUILayout.EnumMaskField("", bc.options, GUILayout.Width(150));
                         GUILayout.FlexibleSpace();
                         if (GUILayout.Button("Make default"))
                         {
                             _defaultBuildOptions = bc.options;
+                            SaveToolSettings();
+                        }
+                        EditorGUILayout.EndHorizontal();
+
+                        EditorGUILayout.BeginHorizontal();
+                        EditorGUILayout.LabelField("Define Symbols", GUILayout.Width(125));
+                        string prevSymbols = bc.customDefineSymbols;
+                        bc.customDefineSymbols = EditorGUILayout.TextField("", bc.customDefineSymbols);
+                        if (bc.customDefineSymbols!=null && !bc.customDefineSymbols.Equals(prevSymbols))
+                        {
+                            bc.customDefineSymbols = bc.customDefineSymbols.Trim();
+                            bc.customDefineSymbols = bc.customDefineSymbols.Trim(';');
+                            bc.customDefineSymbols = bc.customDefineSymbols.Replace(" ", ";");
+                        }
+                        GUILayout.FlexibleSpace();
+                        if (GUILayout.Button("Make default"))
+                        {
+                            _defaultDefineSymbols = bc.customDefineSymbols;
                             SaveToolSettings();
                         }
                         EditorGUILayout.EndHorizontal();
@@ -789,7 +810,7 @@ public class Builder : EditorWindow
                         {
                             for (int k = 0; k < _sceneList.Length; k++)
                             {
-                                if (EditorGUILayout.ToggleLeft(_sceneList[k].name, bc.scenes.Contains(_sceneList[k])))
+                                if (EditorGUILayout.ToggleLeft(_sceneList[k].Name, bc.scenes.Contains(_sceneList[k])))
                                 {
                                     if (!bc.scenes.Contains(_sceneList[k]))
                                     {
@@ -801,6 +822,30 @@ public class Builder : EditorWindow
                                     bc.scenes.Remove(_sceneList[k]);
                                 }
                             }
+
+                            for (int k = 0; k < bc.scenes.Count; k++)
+                            {
+                                if (!bc.scenes[k].isFound)
+                                {
+                                    EditorGUILayout.BeginHorizontal();
+                                    EditorGUILayout.LabelField(bc.scenes[k].Name + " (Missing)", _missingSceneStyle);
+                                    if (GUILayout.Button("Locate", EditorStyles.miniButtonLeft, GUILayout.Width(75)))
+                                    {
+                                        string file = EditorUtility.OpenFilePanel("Locate " + bc.scenes[k].Name, Application.dataPath, "unity");
+                                        file = "Assets" + file.Replace(Application.dataPath, "");
+                                        bc.scenes[k].Path = file;
+                                        bc.scenes[k].isFound = true;
+                                    }
+                                    GUI.color = Color.red;
+                                    if (GUILayout.Button("Remove", EditorStyles.miniButtonRight, GUILayout.Width(75)))
+                                    {
+                                        bc.scenes.RemoveAt(k);
+                                    }
+                                    GUI.color = _defaultGuiColor;
+                                    GUILayout.FlexibleSpace();
+                                    EditorGUILayout.EndHorizontal();
+                                }
+                            }
                         }
                         EditorGUILayout.EndVertical();
                         #endregion
@@ -810,6 +855,7 @@ public class Builder : EditorWindow
                 }
 
                 #region Build
+                //Disable build button if there are no enabled builds.
                 GUI.enabled = _builds.Count(build => build.enabled == true) > 0;
 
                 EditorGUILayout.BeginHorizontal();
@@ -828,7 +874,12 @@ public class Builder : EditorWindow
 
                 if (GUILayout.Button("Browse", EditorStyles.miniButtonRight, GUILayout.Width(100))) { EditorUtility.RevealInFinder(_mainBuildPath); }
                 EditorGUILayout.EndHorizontal();
-                if (GUILayout.Button("Start Build", GUILayout.Width(100)))
+
+                EditorGUILayout.BeginHorizontal();
+                float buildButtonSize = 100;
+                //Center build button.
+                GUILayout.Space(window.position.width * 0.5f - buildButtonSize * 0.5f);
+                if (GUILayout.Button("Start Build", GUILayout.Width(buildButtonSize)))
                 {
                     SelectBuildPath();
                     EditorGUILayout.EndScrollView();
@@ -836,7 +887,8 @@ public class Builder : EditorWindow
                     isScrollAlive = false;
                     return;
                 }
-                GUILayout.FlexibleSpace();
+                EditorGUILayout.EndHorizontal();
+
                 GUI.enabled = true;
                 #endregion
 
@@ -908,7 +960,7 @@ public class Builder : EditorWindow
         GUI.enabled = true;
         if (GUILayout.Button("+", EditorStyles.miniButtonLeft, GUILayout.Width(25)))
         {
-            BuildConfiguration bc = new BuildConfiguration();
+            BuildConfiguration bc = new BuildConfiguration(_defaultBuildOptions, _defaultDefineSymbols);
             int index = 0;
             while (index < _builds.Count - 1)
             {
@@ -962,94 +1014,136 @@ public class Builder : EditorWindow
 
             if (!bc.enabled) { Debug.Log(bc.name + " " + bc.uniqueId + " is Disabled. Skipped."); _toBeBuild.RemoveAt(0); }
             else if (bc.scenes.Count == 0) { Debug.Log(bc.name + " " + bc.uniqueId + " has no Scenes added. Skipped."); _toBeBuild.RemoveAt(0); }
+            else if (bc.scenes.Count(scene => !scene.isFound) > 0) { Debug.Log(bc.name + " " + bc.uniqueId + " has missing Scenes. Skipped."); _toBeBuild.RemoveAt(0); }
             else
             {
                 Debug.Log(bc.name + " Started...");
                 sw.Start();
 
                 string extension = String.Empty;
+                string defineSymbolsBackup = String.Empty;
+                BuildTargetGroup currentBuildTargetGroup;
+                bool isBuildGroupUnkown = false;
                 switch (bc.target)
                 {
                     case BuildTarget.Android:
+                        currentBuildTargetGroup = BuildTargetGroup.Android;
                         extension = ".apk";
                         break;
                     case BuildTarget.BlackBerry:
+                        currentBuildTargetGroup = BuildTargetGroup.BlackBerry;
                         //Not implemented.
                         break;
                     case BuildTarget.FlashPlayer:
+                        currentBuildTargetGroup = BuildTargetGroup.FlashPlayer;
                         //Not implemented. flv?
                         break;
                     case BuildTarget.MetroPlayer:
+                        currentBuildTargetGroup = BuildTargetGroup.Metro;
                         //Not implemented.
                         break;
                     case BuildTarget.NaCl:
+                        currentBuildTargetGroup = BuildTargetGroup.NaCl;
                         //Not implemented.
                         break;
                     case BuildTarget.PS3:
+                        currentBuildTargetGroup = BuildTargetGroup.PS3;
                         //Not implemented.
                         break;
                     case BuildTarget.PS4:
+                        currentBuildTargetGroup = BuildTargetGroup.PS4;
                         //Not implemented.
                         break;
                     case BuildTarget.PSM:
+                        currentBuildTargetGroup = BuildTargetGroup.PSM;
                         //Not implemented.
                         break;
                     case BuildTarget.PSP2:
+                        currentBuildTargetGroup = BuildTargetGroup.PSP2;
                         //Not implemented.
                         break;
                     case BuildTarget.SamsungTV:
+                        currentBuildTargetGroup = BuildTargetGroup.SamsungTV;
                         //Not implemented. apk?
                         break;
                     case BuildTarget.StandaloneGLESEmu:
+                        currentBuildTargetGroup = BuildTargetGroup.Standalone;
                         //Not implemented.
                         break;
                     case BuildTarget.StandaloneLinux:
+                        currentBuildTargetGroup = BuildTargetGroup.Standalone;
                         //Not implemented.
                         break;
                     case BuildTarget.StandaloneLinux64:
+                        currentBuildTargetGroup = BuildTargetGroup.Standalone;
                         //Not implemented.
                         break;
                     case BuildTarget.StandaloneLinuxUniversal:
+                        currentBuildTargetGroup = BuildTargetGroup.Standalone;
                         //Not implemented.
                         break;
                     case BuildTarget.StandaloneOSXIntel:
+                        currentBuildTargetGroup = BuildTargetGroup.Standalone;
                         //Not implemented. app? dmg?
                         break;
                     case BuildTarget.StandaloneOSXIntel64:
+                        currentBuildTargetGroup = BuildTargetGroup.Standalone;
                         //Not implemented. app? dmg?
                         break;
                     case BuildTarget.StandaloneOSXUniversal:
+                        currentBuildTargetGroup = BuildTargetGroup.Standalone;
                         //Not implemented. app? dmg?
                         break;
                     case BuildTarget.StandaloneWindows:
+                        currentBuildTargetGroup = BuildTargetGroup.Standalone;
                         extension = ".exe";
                         break;
                     case BuildTarget.StandaloneWindows64:
+                        currentBuildTargetGroup = BuildTargetGroup.Standalone;
                         extension = ".exe";
                         break;
                     case BuildTarget.Tizen:
+                        currentBuildTargetGroup = BuildTargetGroup.Tizen;
                         //Not implemented.
                         break;
                     case BuildTarget.WP8Player:
+                        currentBuildTargetGroup = BuildTargetGroup.WP8;
                         //Not implemented. xap?
                         break;
                     case BuildTarget.WebPlayer:
+                        currentBuildTargetGroup = BuildTargetGroup.WebPlayer;
                         extension = "";
                         break;
                     case BuildTarget.WebPlayerStreamed:
+                        currentBuildTargetGroup = BuildTargetGroup.WebPlayer;
                         //Not implemented. ""?
                         break;
                     case BuildTarget.XBOX360:
+                        currentBuildTargetGroup = BuildTargetGroup.XBOX360;
                         //Not implemented.
                         break;
                     case BuildTarget.XboxOne:
+                        currentBuildTargetGroup = BuildTargetGroup.XboxOne;
                         //Not implemented.
                         break;
                     case BuildTarget.iPhone:
+                        currentBuildTargetGroup = BuildTargetGroup.iPhone;
                         //Not implemented.
                         break;
                     default:
+                        //Make compiler happy. We can't have it undefined so we just but a dummy define in default which is not likely to be fired as long as
+                        //this switch case is maintained with new platforms added. 
+                        currentBuildTargetGroup = BuildTargetGroup.BB10;
+                        isBuildGroupUnkown = true;
                         break;
+                }
+
+                //Ignore if we have somehow triggered default case of above switch.
+                if (!isBuildGroupUnkown)
+                {
+                    //Change Build Symbols
+                    defineSymbolsBackup = PlayerSettings.GetScriptingDefineSymbolsForGroup(currentBuildTargetGroup);
+                    PlayerSettings.SetScriptingDefineSymbolsForGroup(currentBuildTargetGroup, bc.customDefineSymbols);
                 }
 
                 //Prepare path
@@ -1063,7 +1157,7 @@ public class Builder : EditorWindow
                 string[] scenePaths = new string[bc.scenes.Count];
                 for (int p = 0; p < bc.scenes.Count; p++)
                 {
-                    scenePaths[p] = bc.scenes[p].path;
+                    scenePaths[p] = bc.scenes[p].Path;
                 }
 
                 Debug.Log("Building...");
@@ -1072,6 +1166,13 @@ public class Builder : EditorWindow
                 if (!string.IsNullOrEmpty(buildMessage))
                 {
                     Debug.LogError("Build Failed : " + buildMessage);
+                }
+
+                //Ignore if we have somehow triggered default case of above switch.
+                if (!isBuildGroupUnkown)
+                {
+                    //Set Define Symbols to it's initial state before build.
+                    PlayerSettings.SetScriptingDefineSymbolsForGroup(currentBuildTargetGroup, defineSymbolsBackup);
                 }
 
                 Debug.Log(bc.name + " Done. (" + sw.ElapsedMilliseconds + "ms)");
@@ -1111,11 +1212,11 @@ public class Builder : EditorWindow
     public static void OnCompileScripts()
     {
         if (_builds != null) _builds.Clear();
-        //Load scenes
-        RefreshSceneList();
         _preCompileConfSaved = false;
         LoadSettings(LoadMode.PostCompile);
         LoadToolSettings();
+        //Load scenes
+        RefreshSceneList();
         window = (Builder)EditorWindow.GetWindow(typeof(Builder));
         window.Repaint();
     }

@@ -13,9 +13,9 @@ Builder uses following scripts from other Authors to implement some features;
 + [**MiniJSON** by Calvin Rien] (https://gist.github.com/darktable/1411710)
 + [**CommandLineCustomArguments** by EpixCode] (https://github.com/EpixCode/CommandLineCustomArguments)
 
-![Builder](http://i.imgur.com/P6JvAAk.png)
+![Builder Expanded](http://i.imgur.com/o5AYcnl.png)
 
-![Builder](http://i.imgur.com/SsbUiT2.png)
+![Builder Collapsed](http://i.imgur.com/ldXRbAs.png)
 
 ###UI Cheat Sheat
 + **Save** : Overwrites current configuration
