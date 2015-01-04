@@ -630,6 +630,7 @@ public class Builder : EditorWindow
                 #endregion
 
                 EditorGUILayout.Space();
+                #region ToolOptions
 
                 bool prevToggle = _toolOptionsToggle;
                 _toolOptionsToggle = EditorGUILayout.Foldout(_toolOptionsToggle, "Tool Options");
@@ -643,7 +644,8 @@ public class Builder : EditorWindow
                     EditorGUILayout.LabelField(" when completed.");
                     GUILayout.FlexibleSpace();
                     EditorGUILayout.EndHorizontal();
-                }
+                } 
+                #endregion
 
                 EditorGUILayout.Space();
 
@@ -729,7 +731,7 @@ public class Builder : EditorWindow
                 for (int i = 0; i < _builds.Count; i++)
                 {
                     EditorGUI.indentLevel = 0;
-                    #region Build
+                    #region BuildList
                     BuildConfiguration bc = _builds[i];
                     string selectedScenes = string.Empty;
                     if (bc.scenes.Count > 0)
@@ -850,6 +852,7 @@ public class Builder : EditorWindow
                         EditorGUILayout.EndVertical();
                         #endregion
                         EditorGUILayout.EndVertical();
+                        GUI.enabled = true;
                     }
                     #endregion
                 }
