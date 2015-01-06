@@ -1,7 +1,7 @@
 Builder
 =======
 
-###Just Another Unity BuildPipeline Automation Tool
+###Unity BuildPipeline Automation Tool
 
 + Builder is a BuildPipeline automation tool for Unity3D. 
 + Builder requires **UnityPro** to function. [(More info)] (http://docs.unity3d.com/ScriptReference/BuildPipeline.html)
@@ -13,13 +13,13 @@ Builder uses following scripts from other Authors to implement some features;
 + [**MiniJSON** by Calvin Rien] (https://gist.github.com/darktable/1411710)
 + [**CommandLineCustomArguments** by EpixCode] (https://github.com/EpixCode/CommandLineCustomArguments)
 
-![Builder Expanded](http://i.imgur.com/o5AYcnl.png)
+![Builder Expanded](http://i.imgur.com/XHMJcMJ.png)
 
-![Builder Collapsed](http://i.imgur.com/ldXRbAs.png)
+![Builder Collapsed](http://i.imgur.com/1Z29VgM.png)
 
-###UI Cheat Sheat
+###UI Cheat Sheet
 + **Save** : Overwrites current configuration
-+ **Load** : Opens file dialog to load a new configuration.
++ **Load** : Opens file dialogue to load a new configuration.
 + **Save as Default** : Saves current configuration as default configuration.
 + **Save as** : Well, pretty self explanatory isn't it :)
 + **Load Default** : Loads default configuration.
