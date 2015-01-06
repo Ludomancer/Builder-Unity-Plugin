@@ -26,7 +26,6 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ************************************************************************************************************/
-
 #endregion
 using UnityEngine;
 using UnityEditor;
@@ -144,6 +143,37 @@ public class Builder : EditorWindow
         window.Repaint();
     }
 
+    /// <summary>
+    /// Reload recent settings when script recompile finishes.
+    /// </summary>
+    [UnityEditor.Callbacks.DidReloadScripts]
+    public static void OnCompileScripts()
+    {
+        string dirPath = Path.Combine(GetDefaultDirPath(), "PreCompile.ini");
+        if (File.Exists(dirPath))
+        {
+            if (_builds != null) _builds.Clear();
+            _preCompileConfSaved = false;
+            LoadSettings(LoadMode.PostCompile);
+            LoadToolSettings();
+            //Load scenes
+            RefreshSceneList();
+            window = (Builder)EditorWindow.GetWindow(typeof(Builder));
+            window.Repaint();
+        }
+    }
+
+    /// <summary>
+    /// Return default app data dir path.
+    /// </summary>
+    private static string GetDefaultDirPath()
+    {
+        return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Unity/Nidre/Builder");
+    }
+
+    /// <summary>
+    /// Used to read and process command line parameters.
+    /// </summary>
     static void CommandLineBuild()
     {
         RefreshSceneList();
@@ -162,10 +192,13 @@ public class Builder : EditorWindow
         List<Scene> temp = new List<Scene>();
         foreach (UnityEditor.EditorBuildSettingsScene scene in UnityEditor.EditorBuildSettings.scenes)
         {
-            string sceneName = scene.path.Substring(scene.path.LastIndexOf('/') + 1);
-            sceneName = sceneName.Substring(0, sceneName.Length - 6);
-            Scene sceneObj = new Scene(scene.path);
-            temp.Add(sceneObj);
+            if (File.Exists(scene.path))
+            {
+                string sceneName = scene.path.Substring(scene.path.LastIndexOf('/') + 1);
+                sceneName = sceneName.Substring(0, sceneName.Length - 6);
+                Scene sceneObj = new Scene(scene.path);
+                temp.Add(sceneObj);
+            }
         }
         _sceneList = temp.OrderBy(scene => scene.Name).ToArray();
 
@@ -190,8 +223,8 @@ public class Builder : EditorWindow
     /// <summary>
     /// Saves the configurations.
     /// </summary>
-    /// <param name="mode">Save Mode.</param>
-    static void SaveSettings(SaveMode mode)
+    /// <param name="saveMode">Save Mode.</param>
+    static void SaveSettings(SaveMode saveMode)
     {
         Dictionary<string, object> settings = new Dictionary<string, object>();
         settings.Add("mainBuildPath", _mainBuildPath);
@@ -227,10 +260,10 @@ public class Builder : EditorWindow
             settings.Add("build" + i, build);
         }
         string savePath = string.Empty;
-        switch (mode)
+        switch (saveMode)
         {
             case SaveMode.AsDefault:
-                savePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Unity/Nidre/Builder/Default.ini");
+                savePath = Path.Combine(GetDefaultDirPath(), "Default.ini");
                 mostRecentConfiguration = savePath;
                 mostRecentConfigurationName = Path.GetFileName(mostRecentConfiguration);
                 break;
@@ -238,16 +271,18 @@ public class Builder : EditorWindow
                 savePath = mostRecentConfiguration;
                 break;
             case SaveMode.SaveAs:
-                string temp = EditorUtility.SaveFilePanel("Save Configuration", Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Unity/Nidre/Builder").ToString(), "", "ini");
-                if (!string.IsNullOrEmpty(mostRecentConfiguration))
+                string[] appPath = Application.dataPath.Split("/"[0]);
+                string temp = EditorUtility.SaveFilePanel("Save Configuration", GetDefaultDirPath(), appPath[appPath.Length - 2], "ini");
+                if (!string.IsNullOrEmpty(temp))
                 {
                     savePath = temp;
                     mostRecentConfiguration = temp;
                     mostRecentConfigurationName = Path.GetFileName(mostRecentConfiguration);
                 }
+                else return;
                 break;
             case SaveMode.PreCompile:
-                savePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Unity/Nidre/Builder/PreCompile.ini");
+                savePath = Path.Combine(GetDefaultDirPath(), "PreCompile.ini");
                 break;
         }
 
@@ -262,7 +297,7 @@ public class Builder : EditorWindow
         {
             if (!EditorUtility.DisplayDialog("Can't save configuration!", "Invalid file path", "Cancel", "Retry"))
             {
-                SaveSettings(mode);
+                SaveSettings(saveMode);
             }
         }
 
@@ -271,14 +306,15 @@ public class Builder : EditorWindow
     /// <summary>
     /// Loads the configurations.
     /// </summary>
+    /// <param name="loadMode">Load Mode.</param>
     static void LoadSettings(LoadMode loadMode)
     {
-        string dirPath;
         string filePath = null;
+        string serialized = null;
         switch (loadMode)
         {
             case LoadMode.Default:
-                dirPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Unity/Nidre/Builder");
+                string dirPath = GetDefaultDirPath();
                 filePath = Path.Combine(dirPath, "Default.ini");
                 // Create initial golder structure
                 if (!Directory.Exists(dirPath)) Directory.CreateDirectory(dirPath);
@@ -291,10 +327,15 @@ public class Builder : EditorWindow
                     _builds.Add(new BuildConfiguration(_defaultBuildOptions, _defaultDefineSymbols));
                     SaveSettings(SaveMode.AsDefault);
                 }
+                serialized = System.IO.File.ReadAllText(filePath);
                 break;
             case LoadMode.AskForPath:
-                dirPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Unity/Nidre/Builder");
-                filePath = EditorUtility.OpenFilePanel("Load Configuration", dirPath, "ini");
+                filePath = EditorUtility.OpenFilePanel("Load Configuration", GetDefaultDirPath(), "ini");
+                if (!File.Exists(filePath))
+                {
+                    return;
+                }
+                serialized = System.IO.File.ReadAllText(filePath);
                 break;
             case LoadMode.Args:
                 string[] args = Environment.GetCommandLineArgs();
@@ -310,13 +351,14 @@ public class Builder : EditorWindow
                 {
                     throw new ArgumentException("Arguments missing.", "filePath");
                 }
+                serialized = System.IO.File.ReadAllText(filePath);
                 break;
             case LoadMode.PostCompile:
-                dirPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Unity/Nidre/Builder");
-                filePath = Path.Combine(dirPath, "PreCompile.ini");
+                filePath = Path.Combine(GetDefaultDirPath(), "PreCompile.ini");
+                serialized = System.IO.File.ReadAllText(filePath);
+                File.Delete(filePath);
                 break;
         }
-        string serialized = System.IO.File.ReadAllText(filePath);
 
         if (serialized != null)
         {
@@ -425,7 +467,7 @@ public class Builder : EditorWindow
     /// </summary>
     static void SaveToolSettings()
     {
-        string path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Unity/Nidre/Builder/Settings.ini");
+        string path = Path.Combine(GetDefaultDirPath(), "Settings.ini");
 
         Dictionary<string, object> settings = new Dictionary<string, object>();
 
@@ -445,7 +487,7 @@ public class Builder : EditorWindow
     /// </summary>
     static void LoadToolSettings()
     {
-        string dirPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Unity/Nidre/Builder");
+        string dirPath = GetDefaultDirPath();
         string filePath = Path.Combine(dirPath, "Settings.ini");
 
         if (!Directory.Exists(dirPath)) Directory.CreateDirectory(dirPath);
@@ -527,381 +569,6 @@ public class Builder : EditorWindow
         }
     }
 
-    void OnGUI()
-    {
-        if (!UnityEditor.BuildPipeline.isBuildingPlayer)
-        {
-            if (_builds != null)
-            {
-                #region PrepareGuiStyles
-                //Create a title style if we haven't already.
-                //Calling this piece of code outside of OnGUI throws an exception. That's why we do it here.
-                if (_titleStyle == null)
-                {
-                    _titleStyle = new GUIStyle(EditorStyles.boldLabel);
-                    _titleStyle.alignment = TextAnchor.MiddleCenter;
-                }
-                //Create a missing scene style if we haven't already.
-                if (_missingSceneStyle == null)
-                {
-                    _missingSceneStyle = new GUIStyle(EditorStyles.label);
-                    _missingSceneStyle.focused.textColor = Color.red;
-                    _missingSceneStyle.normal.textColor = Color.red;
-                    _missingSceneStyle.active.textColor = Color.red;
-                    _missingSceneStyle.hover.textColor = Color.red;
-                    _missingSceneStyle.onFocused.textColor = Color.red;
-                    _missingSceneStyle.onNormal.textColor = Color.red;
-                    _missingSceneStyle.onActive.textColor = Color.red;
-                    _missingSceneStyle.onHover.textColor = Color.red;
-                }
-                //Create a missing scene style for foldouts if we haven't already.
-                if (_missingSceneFoldoutStyle == null)
-                {
-                    _missingSceneFoldoutStyle = new GUIStyle(EditorStyles.foldout);
-                    _missingSceneFoldoutStyle.focused.textColor = Color.red;
-                    _missingSceneFoldoutStyle.normal.textColor = Color.red;
-                    _missingSceneFoldoutStyle.active.textColor = Color.red;
-                    _missingSceneFoldoutStyle.hover.textColor = Color.red;
-                    _missingSceneFoldoutStyle.onFocused.textColor = Color.red;
-                    _missingSceneFoldoutStyle.onNormal.textColor = Color.red;
-                    _missingSceneFoldoutStyle.onActive.textColor = Color.red;
-                    _missingSceneFoldoutStyle.onHover.textColor = Color.red;
-                }
-                if (_defaultGuiColor.Equals(Color.clear))
-                {
-                    _defaultGuiColor = GUI.color;
-                }
-                #endregion
-                EditorGUILayout.SelectableLabel(mostRecentConfigurationName, _titleStyle, GUILayout.Height(20));
-
-                _scrollPosition = EditorGUILayout.BeginScrollView(_scrollPosition);
-
-                #region BuilderUtils
-                EditorGUILayout.BeginHorizontal();
-                if (GUILayout.Button("Save", EditorStyles.miniButtonLeft))
-                {
-                    SaveSettings(SaveMode.Overwrite);
-                }
-                if (GUILayout.Button("Load", EditorStyles.miniButtonRight))
-                {
-                    LoadSettings(LoadMode.AskForPath);
-                    RefreshSceneList();
-                    Repaint();
-                }
-                EditorGUILayout.Space();
-                if (GUILayout.Button("Save as Default", EditorStyles.miniButtonLeft))
-                {
-                    SaveSettings(SaveMode.AsDefault);
-                }
-                if (GUILayout.Button("Save As..", EditorStyles.miniButtonMid))
-                {
-                    SaveSettings(SaveMode.SaveAs);
-                }
-                if (GUILayout.Button("Load Default", EditorStyles.miniButtonRight))
-                {
-                    LoadSettings(LoadMode.Default);
-                    RefreshSceneList();
-                    Repaint();
-                }
-                GUILayout.FlexibleSpace();
-                if (GUILayout.Button("Refresh Scenes", EditorStyles.miniButton))
-                {
-                    int dialogResult = EditorUtility.DisplayDialogComplex("Refrest Scenes", "You may lose data if scenes names are modified. It is highly recommended to save configuration before refresh.", "Save and Refresh", " Just Refresh", "Cancel");
-
-                    switch (dialogResult)
-                    {
-                        case 0:
-                            SaveSettings(SaveMode.Overwrite);
-                            RefreshSceneList();
-                            break;
-                        case 1:
-                            RefreshSceneList();
-                            break;
-                    }
-                }
-                if (GUILayout.Button("Reset Settings", EditorStyles.miniButton))
-                {
-                    if (EditorUtility.DisplayDialog("Delete All Settings", "This will delete all settings and reset the tool to it's default settings as it was on first use", "Ok", "Cancel"))
-                    {
-                        ResetSettings();
-                    }
-                }
-                EditorGUILayout.EndHorizontal();
-                #endregion
-
-                EditorGUILayout.Space();
-                #region ToolOptions
-
-                bool prevToggle = _toolOptionsToggle;
-                _toolOptionsToggle = EditorGUILayout.Foldout(_toolOptionsToggle, "Tool Options");
-                if (!prevToggle.Equals(_toolOptionsToggle)) SaveToolSettings();
-
-                if (_toolOptionsToggle)
-                {
-                    EditorGUILayout.BeginHorizontal();
-                    _resetTarget = EditorGUILayout.ToggleLeft("Switch to ", _resetTarget, GUILayout.Width(75));
-                    _switchBackTo = (BuildTarget)EditorGUILayout.EnumPopup(_switchBackTo, GUILayout.MaxWidth(150));
-                    EditorGUILayout.LabelField(" when completed.");
-                    GUILayout.FlexibleSpace();
-                    EditorGUILayout.EndHorizontal();
-                } 
-                #endregion
-
-                EditorGUILayout.Space();
-
-                #region SortUtils
-
-                prevToggle = _sortUtilsToggle;
-                _sortUtilsToggle = EditorGUILayout.Foldout(_sortUtilsToggle, "Sort Options");
-                if (!prevToggle.Equals(_sortUtilsToggle)) SaveToolSettings();
-                if (_sortUtilsToggle)
-                {
-                    EditorGUILayout.LabelField("Sort", EditorStyles.boldLabel, null);
-
-                    EditorGUILayout.BeginHorizontal();
-                    _sortMode = (SortMode)EditorGUILayout.EnumPopup("", _sortMode, GUILayout.Width(100));
-                    _sortDirection = (SortDirection)EditorGUILayout.EnumPopup("", _sortDirection, GUILayout.Width(100));
-                    GUI.enabled = _sortMode != SortMode.None;
-                    if (GUILayout.Button("Sort", EditorStyles.miniButton, GUILayout.Width(60)))
-                    {
-                        ApplySort();
-                    }
-                    GUI.enabled = true;
-                    EditorGUILayout.EndHorizontal();
-                }
-                #endregion
-
-                EditorGUILayout.Space();
-
-                #region ListUtils
-
-                prevToggle = _listUtilsToggle;
-                _listUtilsToggle = EditorGUILayout.Foldout(_listUtilsToggle, "List Options");
-                if (!prevToggle.Equals(_listUtilsToggle)) SaveToolSettings();
-                if (_listUtilsToggle)
-                {
-                    EditorGUILayout.LabelField("List Controls", EditorStyles.boldLabel, null);
-
-                    EditorGUILayout.BeginHorizontal();
-                    if (GUILayout.Button("Colapse All", EditorStyles.miniButtonLeft))
-                    {
-                        for (int i = 0; i < _builds.Count; i++)
-                        {
-                            _builds[i].toggle = false;
-                        }
-                    }
-                    if (GUILayout.Button("Expand All", EditorStyles.miniButtonRight))
-                    {
-                        for (int i = 0; i < _builds.Count; i++)
-                        {
-                            _builds[i].toggle = true;
-                        }
-                    }
-                    EditorGUILayout.Space();
-                    if (GUILayout.Button("Enable All", EditorStyles.miniButtonLeft))
-                    {
-                        for (int i = 0; i < _builds.Count; i++)
-                        {
-                            _builds[i].enabled = true;
-                        }
-                    }
-                    if (GUILayout.Button("Disable All", EditorStyles.miniButtonRight))
-                    {
-                        for (int i = 0; i < _builds.Count; i++)
-                        {
-                            _builds[i].enabled = false;
-                        }
-                    }
-                    GUILayout.FlexibleSpace();
-                    if (GUILayout.Button("Clear", EditorStyles.miniButton))
-                    {
-                        _builds.Clear();
-                        _builds.Add(new BuildConfiguration(_defaultBuildOptions, _defaultDefineSymbols));
-                    }
-                    EditorGUILayout.EndHorizontal();
-                }
-                #endregion
-
-                EditorGUILayout.Space();
-
-
-                EditorGUILayout.LabelField("Build Queue", EditorStyles.boldLabel, null);
-
-                isScrollAlive = true;
-                for (int i = 0; i < _builds.Count; i++)
-                {
-                    EditorGUI.indentLevel = 0;
-                    #region BuildList
-                    BuildConfiguration bc = _builds[i];
-                    string selectedScenes = string.Empty;
-                    if (bc.scenes.Count > 0)
-                    {
-                        selectedScenes = "(";
-                        bc.scenes = bc.scenes.OrderBy(scene => scene.Name).ToList();
-                        for (int s = 0; s < bc.scenes.Count; s++)
-                        {
-                            selectedScenes += bc.scenes[s].Name;
-                            if (s < bc.scenes.Count - 1)
-                            {
-                                selectedScenes += ",";
-                            }
-                        }
-                        selectedScenes += ")";
-                    }
-
-                    #region Title
-                    EditorGUILayout.BeginHorizontal();
-                    bc.enabled = EditorGUILayout.ToggleLeft("", bc.enabled, GUILayout.Width(10));
-                    Rect r = GUILayoutUtility.GetLastRect();
-                    r.width = 65;
-                    r.x += 15;
-                    if (bc.scenes.Count(item => !item.isFound) > 0) bc.toggle = EditorGUI.Foldout(r, bc.toggle, bc.uniqueId, true, _missingSceneFoldoutStyle);
-                    else bc.toggle = EditorGUI.Foldout(r, bc.toggle, bc.uniqueId, true);
-
-                    GUILayout.Space(65);
-                    bc.name = EditorGUILayout.TextField(bc.name);
-                    bc.target = (BuildTarget)EditorGUILayout.EnumPopup("", bc.target, GUILayout.MaxWidth(150));
-                    EditorGUILayout.SelectableLabel(selectedScenes);
-                    GUILayout.FlexibleSpace();
-
-                    BuildConfListUtils(i);
-
-                    EditorGUILayout.EndHorizontal();
-                    #endregion
-
-                    if (bc.toggle)
-                    {
-                        EditorGUILayout.BeginVertical();
-                        GUI.enabled = bc.enabled;
-
-                        EditorGUI.indentLevel++;
-                        EditorGUILayout.BeginHorizontal();
-                        EditorGUILayout.LabelField("Build Options", GUILayout.Width(125));
-                        bc.options = (BuildOptions)EditorGUILayout.EnumMaskField("", bc.options, GUILayout.Width(150));
-                        GUILayout.FlexibleSpace();
-                        if (GUILayout.Button("Make default"))
-                        {
-                            _defaultBuildOptions = bc.options;
-                            SaveToolSettings();
-                        }
-                        EditorGUILayout.EndHorizontal();
-
-                        EditorGUILayout.BeginHorizontal();
-                        EditorGUILayout.LabelField("Define Symbols", GUILayout.Width(125));
-                        string prevSymbols = bc.customDefineSymbols;
-                        bc.customDefineSymbols = EditorGUILayout.TextField("", bc.customDefineSymbols);
-                        if (bc.customDefineSymbols!=null && !bc.customDefineSymbols.Equals(prevSymbols))
-                        {
-                            bc.customDefineSymbols = bc.customDefineSymbols.Trim();
-                            bc.customDefineSymbols = bc.customDefineSymbols.Trim(';');
-                            bc.customDefineSymbols = bc.customDefineSymbols.Replace(" ", ";");
-                        }
-                        GUILayout.FlexibleSpace();
-                        if (GUILayout.Button("Make default"))
-                        {
-                            _defaultDefineSymbols = bc.customDefineSymbols;
-                            SaveToolSettings();
-                        }
-                        EditorGUILayout.EndHorizontal();
-
-                        #region SceneList
-                        EditorGUILayout.BeginVertical();
-                        bc.scenesToggle = EditorGUILayout.Foldout(bc.scenesToggle, "Scenes " + selectedScenes);
-                        EditorGUI.indentLevel++;
-                        if (bc.scenesToggle)
-                        {
-                            for (int k = 0; k < _sceneList.Length; k++)
-                            {
-                                if (EditorGUILayout.ToggleLeft(_sceneList[k].Name, bc.scenes.Contains(_sceneList[k])))
-                                {
-                                    if (!bc.scenes.Contains(_sceneList[k]))
-                                    {
-                                        bc.scenes.Add(_sceneList[k]);
-                                    }
-                                }
-                                else
-                                {
-                                    bc.scenes.Remove(_sceneList[k]);
-                                }
-                            }
-
-                            for (int k = 0; k < bc.scenes.Count; k++)
-                            {
-                                if (!bc.scenes[k].isFound)
-                                {
-                                    EditorGUILayout.BeginHorizontal();
-                                    EditorGUILayout.LabelField(bc.scenes[k].Name + " (Missing)", _missingSceneStyle);
-                                    if (GUILayout.Button("Locate", EditorStyles.miniButtonLeft, GUILayout.Width(75)))
-                                    {
-                                        string file = EditorUtility.OpenFilePanel("Locate " + bc.scenes[k].Name, Application.dataPath, "unity");
-                                        file = "Assets" + file.Replace(Application.dataPath, "");
-                                        bc.scenes[k].Path = file;
-                                        bc.scenes[k].isFound = true;
-                                    }
-                                    GUI.color = Color.red;
-                                    if (GUILayout.Button("Remove", EditorStyles.miniButtonRight, GUILayout.Width(75)))
-                                    {
-                                        bc.scenes.RemoveAt(k);
-                                    }
-                                    GUI.color = _defaultGuiColor;
-                                    GUILayout.FlexibleSpace();
-                                    EditorGUILayout.EndHorizontal();
-                                }
-                            }
-                        }
-                        EditorGUILayout.EndVertical();
-                        #endregion
-                        EditorGUILayout.EndVertical();
-                        GUI.enabled = true;
-                    }
-                    #endregion
-                }
-
-                #region Build
-                //Disable build button if there are no enabled builds.
-                GUI.enabled = _builds.Count(build => build.enabled == true) > 0;
-
-                EditorGUILayout.BeginHorizontal();
-                GUILayout.Label("Build Folder : ", GUILayout.Width(95));
-                if (string.IsNullOrEmpty(_mainBuildPath))
-                {
-                    GUILayout.Label("Choose Folder", GUILayout.MaxWidth(window.position.width - 250));
-                    if (GUILayout.Button("...", EditorStyles.miniButtonLeft, GUILayout.Width(25))) { _mainBuildPath = EditorUtility.OpenFolderPanel("Select folder", _mainBuildPath, _mainBuildPath) + "/"; }
-                    GUI.enabled = false;
-                }
-                else
-                {
-                    GUILayout.Label(_mainBuildPath, GUILayout.MaxWidth(window.position.width - 250));
-                    if (GUILayout.Button("...", EditorStyles.miniButtonLeft, GUILayout.Width(25))) { EditorUtility.OpenFolderPanel("Select folder", EditorApplication.applicationPath, ""); }
-                }
-
-                if (GUILayout.Button("Browse", EditorStyles.miniButtonRight, GUILayout.Width(100))) { EditorUtility.RevealInFinder(_mainBuildPath); }
-                EditorGUILayout.EndHorizontal();
-
-                EditorGUILayout.BeginHorizontal();
-                float buildButtonSize = 100;
-                //Center build button.
-                GUILayout.Space(window.position.width * 0.5f - buildButtonSize * 0.5f);
-                if (GUILayout.Button("Start Build", GUILayout.Width(buildButtonSize)))
-                {
-                    SelectBuildPath();
-                    EditorGUILayout.EndScrollView();
-                    Build();
-                    isScrollAlive = false;
-                    return;
-                }
-                EditorGUILayout.EndHorizontal();
-
-                GUI.enabled = true;
-                #endregion
-
-            }
-            if (isScrollAlive) EditorGUILayout.EndScrollView();
-        }
-
-        if (window) EditorUtility.SetDirty(window);
-    }
-
     /// <summary>
     /// Applies the sort.
     /// </summary>
@@ -925,63 +592,22 @@ public class Builder : EditorWindow
     }
 
     /// <summary>
-    /// Displays the build configuration list utilities.
+    /// Generate Unique Id for Build Configuration
     /// </summary>
-    /// <param name="i">The build index.</param>
-    static void BuildConfListUtils(int i)
+    static string GenerateUniqueId()
     {
-        GUI.enabled = i > 0;
-        if (GUILayout.Button("Up", EditorStyles.miniButtonLeft, GUILayout.Width(40)))
+        string id = UnityEngine.Random.Range(0, 1000000).ToString("000000");
+        int index = 0;
+        while (index < _builds.Count - 1)
         {
-            BuildConfiguration bc = _builds[i];
-            _builds.RemoveAt(i);
-            _builds.Insert(i - 1, bc);
-        }
-        GUI.enabled = true;
-        if (GUILayout.Button("Copy", EditorStyles.miniButtonMid, GUILayout.Width(40)))
-        {
-            BuildConfiguration bc = _builds[i].Copy();
-            int index = 0;
-            while (index < _builds.Count - 1)
+            if (_builds[index].uniqueId.Equals(id))
             {
-                if (_builds[index].uniqueId.Equals(bc.uniqueId))
-                {
-                    bc.uniqueId = UnityEngine.Random.Range(0, 1000000).ToString("000000");
-                    index = 0;
-                }
-                else index++;
+                id = UnityEngine.Random.Range(0, 1000000).ToString("000000");
+                index = 0;
             }
-            _builds.Insert(i + 1, bc);
+            else index++;
         }
-        GUI.enabled = i < _builds.Count - 1;
-        if (GUILayout.Button("Down", EditorStyles.miniButtonRight, GUILayout.Width(40)))
-        {
-            BuildConfiguration bc = _builds[i];
-            _builds.RemoveAt(i);
-            _builds.Insert(i + 1, bc);
-        }
-        GUI.enabled = true;
-        if (GUILayout.Button("+", EditorStyles.miniButtonLeft, GUILayout.Width(25)))
-        {
-            BuildConfiguration bc = new BuildConfiguration(_defaultBuildOptions, _defaultDefineSymbols);
-            int index = 0;
-            while (index < _builds.Count - 1)
-            {
-                if (_builds[index].uniqueId.Equals(bc.uniqueId))
-                {
-                    bc.uniqueId = UnityEngine.Random.Range(0, 1000000).ToString("000000");
-                    index = 0;
-                }
-                else index++;
-            }
-            _builds.Insert(i + 1, bc);
-        }
-        GUI.enabled = _builds.Count > 1;
-        if (GUILayout.Button("-", EditorStyles.miniButtonRight, GUILayout.Width(25)))
-        {
-            _builds.RemoveAt(i);
-        }
-        GUI.enabled = true;
+        return id;
     }
 
     /// <summary>
@@ -1015,9 +641,9 @@ public class Builder : EditorWindow
                 }
             }
 
-            if (!bc.enabled) { Debug.Log(bc.name + " " + bc.uniqueId + " is Disabled. Skipped."); _toBeBuild.RemoveAt(0); }
-            else if (bc.scenes.Count == 0) { Debug.Log(bc.name + " " + bc.uniqueId + " has no Scenes added. Skipped."); _toBeBuild.RemoveAt(0); }
-            else if (bc.scenes.Count(scene => !scene.isFound) > 0) { Debug.Log(bc.name + " " + bc.uniqueId + " has missing Scenes. Skipped."); _toBeBuild.RemoveAt(0); }
+            if (!bc.enabled) { Debug.LogWarning(bc.name + " " + bc.uniqueId + " is Disabled. Skipped."); _toBeBuild.RemoveAt(0); }
+            else if (bc.scenes.Count == 0) { Debug.LogWarning(bc.name + " " + bc.uniqueId + " has no Scenes added. Skipped."); _toBeBuild.RemoveAt(0); }
+            else if (bc.scenes.Count(scene => !scene.isFound) > 0) { Debug.LogWarning(bc.name + " " + bc.uniqueId + " has missing Scenes. Skipped."); _toBeBuild.RemoveAt(0); }
             else
             {
                 Debug.Log(bc.name + " Started...");
@@ -1208,19 +834,468 @@ public class Builder : EditorWindow
         }
     }
 
-    /// <summary>
-    /// Reload recent settings when script recompile finishes.
-    /// </summary>
-    [UnityEditor.Callbacks.DidReloadScripts]
-    public static void OnCompileScripts()
+    void OnGUI()
     {
-        if (_builds != null) _builds.Clear();
-        _preCompileConfSaved = false;
-        LoadSettings(LoadMode.PostCompile);
-        LoadToolSettings();
-        //Load scenes
-        RefreshSceneList();
-        window = (Builder)EditorWindow.GetWindow(typeof(Builder));
-        window.Repaint();
+        if (!UnityEditor.BuildPipeline.isBuildingPlayer)
+        {
+            if (_builds != null)
+            {
+                #region PrepareGuiStyles
+                //Create a title style if we haven't already.
+                //Calling this piece of code outside of OnGUI throws an exception. That's why we do it here.
+                if (_titleStyle == null)
+                {
+                    _titleStyle = new GUIStyle(EditorStyles.boldLabel);
+                    _titleStyle.alignment = TextAnchor.MiddleCenter;
+                }
+                //Create a missing scene style if we haven't already.
+                if (_missingSceneStyle == null)
+                {
+                    _missingSceneStyle = new GUIStyle(EditorStyles.label);
+                    _missingSceneStyle.focused.textColor = Color.red;
+                    _missingSceneStyle.normal.textColor = Color.red;
+                    _missingSceneStyle.active.textColor = Color.red;
+                    _missingSceneStyle.hover.textColor = Color.red;
+                    _missingSceneStyle.onFocused.textColor = Color.red;
+                    _missingSceneStyle.onNormal.textColor = Color.red;
+                    _missingSceneStyle.onActive.textColor = Color.red;
+                    _missingSceneStyle.onHover.textColor = Color.red;
+                }
+                //Create a missing scene style for foldouts if we haven't already.
+                if (_missingSceneFoldoutStyle == null)
+                {
+                    _missingSceneFoldoutStyle = new GUIStyle(EditorStyles.foldout);
+                    _missingSceneFoldoutStyle.focused.textColor = Color.red;
+                    _missingSceneFoldoutStyle.normal.textColor = Color.red;
+                    _missingSceneFoldoutStyle.active.textColor = Color.red;
+                    _missingSceneFoldoutStyle.hover.textColor = Color.red;
+                    _missingSceneFoldoutStyle.onFocused.textColor = Color.red;
+                    _missingSceneFoldoutStyle.onNormal.textColor = Color.red;
+                    _missingSceneFoldoutStyle.onActive.textColor = Color.red;
+                    _missingSceneFoldoutStyle.onHover.textColor = Color.red;
+                }
+                if (_defaultGuiColor.Equals(Color.clear))
+                {
+                    _defaultGuiColor = GUI.backgroundColor;
+                }
+                #endregion
+
+                EditorGUILayout.SelectableLabel(mostRecentConfigurationName, _titleStyle, GUILayout.Height(20));
+
+                #region BuilderUtils
+                EditorGUILayout.BeginHorizontal();
+                if (GUILayout.Button("Save", EditorStyles.miniButtonLeft))
+                {
+                    if (mostRecentConfiguration.Equals(Path.Combine(GetDefaultDirPath(), "Default.ini")))
+                    {
+                        if (EditorUtility.DisplayDialog("Warning!", "Are you sure you want to overwrite 'Default Configuration'?", "Save", "Cancel"))
+                        {
+                            SaveSettings(SaveMode.Overwrite);
+                        }
+                    }
+                    else SaveSettings(SaveMode.Overwrite);
+                }
+                if (GUILayout.Button("Save As..", EditorStyles.miniButtonMid))
+                {
+                    SaveSettings(SaveMode.SaveAs);
+                }
+                if (GUILayout.Button("Load", EditorStyles.miniButtonRight))
+                {
+                    LoadSettings(LoadMode.AskForPath);
+                    RefreshSceneList();
+                    Repaint();
+                }
+                EditorGUILayout.Space();
+                if (GUILayout.Button("Save as Default", EditorStyles.miniButtonLeft))
+                {
+                    SaveSettings(SaveMode.AsDefault);
+                }
+                if (GUILayout.Button("Load Default", EditorStyles.miniButtonRight))
+                {
+                    LoadSettings(LoadMode.Default);
+                    RefreshSceneList();
+                    Repaint();
+                }
+                GUILayout.FlexibleSpace();
+                if (GUILayout.Button("Refresh Scenes", EditorStyles.miniButton))
+                {
+                    int dialogResult = EditorUtility.DisplayDialogComplex("Refrest Scenes", "You may lose data if scenes names are modified. It is highly recommended to save configuration before refresh.", "Save and Refresh", " Just Refresh", "Cancel");
+
+                    switch (dialogResult)
+                    {
+                        case 0:
+                            SaveSettings(SaveMode.Overwrite);
+                            RefreshSceneList();
+                            break;
+                        case 1:
+                            RefreshSceneList();
+                            break;
+                    }
+                }
+                if (GUILayout.Button("Reset Settings", EditorStyles.miniButton))
+                {
+                    if (EditorUtility.DisplayDialog("Delete All Settings", "This will delete all settings and reset the tool to it's default settings as it was on first use", "Ok", "Cancel"))
+                    {
+                        ResetSettings();
+                    }
+                }
+                EditorGUILayout.EndHorizontal();
+                EditorGUILayout.Space();
+                #endregion
+
+                _scrollPosition = EditorGUILayout.BeginScrollView(_scrollPosition);
+
+                #region ToolOptions
+
+                bool prevToggle = _toolOptionsToggle;
+                _toolOptionsToggle = EditorGUILayout.Foldout(_toolOptionsToggle, "Tool Options");
+                if (!prevToggle.Equals(_toolOptionsToggle)) SaveToolSettings();
+
+                if (_toolOptionsToggle)
+                {
+                    EditorGUILayout.BeginHorizontal();
+                    _resetTarget = EditorGUILayout.ToggleLeft("Switch to ", _resetTarget, GUILayout.Width(75));
+                    _switchBackTo = (BuildTarget)EditorGUILayout.EnumPopup(_switchBackTo, GUILayout.MaxWidth(150));
+                    EditorGUILayout.LabelField(" when completed.");
+                    GUILayout.FlexibleSpace();
+                    EditorGUILayout.EndHorizontal();
+                }
+                EditorGUILayout.Space();
+                #endregion
+
+                #region SortUtils
+
+                prevToggle = _sortUtilsToggle;
+                _sortUtilsToggle = EditorGUILayout.Foldout(_sortUtilsToggle, "Sort Options");
+                if (!prevToggle.Equals(_sortUtilsToggle)) SaveToolSettings();
+                if (_sortUtilsToggle)
+                {
+                    EditorGUILayout.LabelField("Sort", EditorStyles.boldLabel, null);
+
+                    EditorGUILayout.BeginHorizontal();
+                    _sortMode = (SortMode)EditorGUILayout.EnumPopup("", _sortMode, GUILayout.Width(100));
+                    _sortDirection = (SortDirection)EditorGUILayout.EnumPopup("", _sortDirection, GUILayout.Width(100));
+                    GUI.enabled = _sortMode != SortMode.None;
+                    if (GUILayout.Button("Sort", EditorStyles.miniButton, GUILayout.Width(60)))
+                    {
+                        ApplySort();
+                    }
+                    GUI.enabled = true;
+                    EditorGUILayout.EndHorizontal();
+                }
+                EditorGUILayout.Space();
+                #endregion
+
+                #region ListUtils
+
+                prevToggle = _listUtilsToggle;
+                _listUtilsToggle = EditorGUILayout.Foldout(_listUtilsToggle, "List Options");
+                if (!prevToggle.Equals(_listUtilsToggle)) SaveToolSettings();
+                if (_listUtilsToggle)
+                {
+                    EditorGUILayout.LabelField("List Controls", EditorStyles.boldLabel, null);
+
+                    EditorGUILayout.BeginHorizontal();
+                    if (GUILayout.Button("Colapse All", EditorStyles.miniButtonLeft))
+                    {
+                        for (int i = 0; i < _builds.Count; i++)
+                        {
+                            _builds[i].toggle = false;
+                        }
+                    }
+                    if (GUILayout.Button("Expand All", EditorStyles.miniButtonRight))
+                    {
+                        for (int i = 0; i < _builds.Count; i++)
+                        {
+                            _builds[i].toggle = true;
+                        }
+                    }
+                    EditorGUILayout.Space();
+                    if (GUILayout.Button("Enable All", EditorStyles.miniButtonLeft))
+                    {
+                        for (int i = 0; i < _builds.Count; i++)
+                        {
+                            _builds[i].enabled = true;
+                        }
+                    }
+                    if (GUILayout.Button("Disable All", EditorStyles.miniButtonRight))
+                    {
+                        for (int i = 0; i < _builds.Count; i++)
+                        {
+                            _builds[i].enabled = false;
+                        }
+                    }
+                    GUILayout.FlexibleSpace();
+                    if (GUILayout.Button("Clear", EditorStyles.miniButton))
+                    {
+                        _builds.Clear();
+                        _builds.Add(new BuildConfiguration(_defaultBuildOptions, _defaultDefineSymbols));
+                    }
+                    EditorGUILayout.EndHorizontal();
+                }
+                EditorGUILayout.Space();
+                #endregion
+
+                #region BuildQueue
+                EditorGUILayout.LabelField("Build Queue", EditorStyles.boldLabel, null);
+
+                isScrollAlive = true;
+                for (int i = 0; i < _builds.Count; i++)
+                {
+                    EditorGUI.indentLevel = 0;
+                    BuildConfiguration bc = _builds[i];
+                    string selectedScenes = string.Empty;
+                    if (bc.scenes.Count > 0)
+                    {
+                        selectedScenes = "(";
+                        for (int s = 0; s < bc.scenes.Count; s++)
+                        {
+                            selectedScenes += bc.scenes[s].Name;
+                            if (s < bc.scenes.Count - 1)
+                            {
+                                selectedScenes += ",";
+                            }
+                        }
+                        selectedScenes += ")";
+                    }
+
+                    EditorGUILayout.BeginHorizontal();
+                    #region ListItemTitle
+                    bc.enabled = EditorGUILayout.ToggleLeft("", bc.enabled, GUILayout.Width(10));
+                    Rect r = GUILayoutUtility.GetLastRect();
+                    r.width = 65;
+                    r.x += 15;
+                    if (bc.scenes.Count(item => !item.isFound) > 0) bc.toggle = EditorGUI.Foldout(r, bc.toggle, bc.uniqueId, true, _missingSceneFoldoutStyle);
+                    else bc.toggle = EditorGUI.Foldout(r, bc.toggle, bc.uniqueId, true);
+
+                    GUILayout.Space(65);
+                    bc.name = EditorGUILayout.TextField(bc.name);
+                    bc.target = (BuildTarget)EditorGUILayout.EnumPopup("", bc.target, GUILayout.MaxWidth(150));
+                    EditorGUILayout.SelectableLabel(selectedScenes);
+                    GUILayout.FlexibleSpace();
+                    #endregion
+
+                    #region BuildListUtils
+                    GUI.enabled = i > 0;
+                    if (GUILayout.Button("Up", EditorStyles.miniButtonLeft, GUILayout.Width(40)))
+                    {
+                        BuildConfiguration buildConf = _builds[i];
+                        _builds.RemoveAt(i);
+                        _builds.Insert(i - 1, buildConf);
+                    }
+                    GUI.enabled = true;
+                    if (GUILayout.Button("Copy", EditorStyles.miniButtonMid, GUILayout.Width(40)))
+                    {
+                        BuildConfiguration buildConf = _builds[i].Copy();
+                        buildConf.uniqueId = GenerateUniqueId();
+                        _builds.Insert(i + 1, buildConf);
+                    }
+                    GUI.enabled = i < _builds.Count - 1;
+                    if (GUILayout.Button("Down", EditorStyles.miniButtonRight, GUILayout.Width(40)))
+                    {
+                        BuildConfiguration buildConf = _builds[i];
+                        _builds.RemoveAt(i);
+                        _builds.Insert(i + 1, buildConf);
+                    }
+                    GUI.enabled = true;
+                    if (GUILayout.Button("+", EditorStyles.miniButtonLeft, GUILayout.Width(25)))
+                    {
+                        BuildConfiguration buildConf = new BuildConfiguration(_defaultBuildOptions, _defaultDefineSymbols);
+                        buildConf.uniqueId = GenerateUniqueId();
+                        _builds.Insert(i + 1, buildConf);
+                    }
+                    GUI.enabled = _builds.Count > 1;
+                    if (GUILayout.Button("-", EditorStyles.miniButtonRight, GUILayout.Width(25)))
+                    {
+                        _builds.RemoveAt(i);
+                    }
+                    GUI.enabled = true;
+                    #endregion
+                    EditorGUILayout.EndHorizontal();
+
+                    #region ListItemDetails
+                    if (bc.toggle)
+                    {
+                        EditorGUILayout.BeginVertical();
+                        GUI.enabled = bc.enabled;
+
+                        EditorGUI.indentLevel++;
+                        EditorGUILayout.BeginHorizontal();
+                        EditorGUILayout.LabelField("Build Options", GUILayout.Width(125));
+                        bc.options = (BuildOptions)EditorGUILayout.EnumMaskField("", bc.options, GUILayout.Width(150));
+                        GUILayout.FlexibleSpace();
+                        if (GUILayout.Button("Make default"))
+                        {
+                            _defaultBuildOptions = bc.options;
+                            SaveToolSettings();
+                        }
+                        EditorGUILayout.EndHorizontal();
+
+                        EditorGUILayout.BeginHorizontal();
+                        EditorGUILayout.LabelField("Define Symbols", GUILayout.Width(125));
+                        string prevSymbols = bc.customDefineSymbols;
+                        bc.customDefineSymbols = EditorGUILayout.TextField("", bc.customDefineSymbols);
+                        if (bc.customDefineSymbols != null && !bc.customDefineSymbols.Equals(prevSymbols))
+                        {
+                            bc.customDefineSymbols = bc.customDefineSymbols.Trim();
+                            bc.customDefineSymbols = bc.customDefineSymbols.Trim(';');
+                            bc.customDefineSymbols = bc.customDefineSymbols.Replace(" ", ";");
+                        }
+                        GUILayout.FlexibleSpace();
+                        if (GUILayout.Button("Make default"))
+                        {
+                            _defaultDefineSymbols = bc.customDefineSymbols;
+                            SaveToolSettings();
+                        }
+                        EditorGUILayout.EndHorizontal();
+
+                        #region SceneList
+                        EditorGUILayout.BeginVertical();
+                        bc.scenesToggle = EditorGUILayout.Foldout(bc.scenesToggle, "Scenes " + selectedScenes);
+                        EditorGUI.indentLevel++;
+                        if (bc.scenesToggle)
+                        {
+                            #region IncludedScenes
+                            EditorGUILayout.LabelField("Included", EditorStyles.boldLabel);
+                            EditorGUI.indentLevel++;
+                            for (int k = 0; k < bc.scenes.Count; k++)
+                            {
+                                EditorGUILayout.BeginHorizontal();
+                                if (bc.scenes[k].isFound)
+                                {
+                                    if (!EditorGUILayout.ToggleLeft(bc.scenes[k].Name, true))
+                                    {
+                                        bc.scenes.Remove(bc.scenes[k]);
+                                        break;
+                                    }
+                                }
+                                else
+                                {
+                                    EditorGUILayout.LabelField(bc.scenes[k].Name, _missingSceneStyle);
+                                }
+                                GUI.enabled = k > 0;
+                                if (GUILayout.Button("Up", EditorStyles.miniButtonLeft, GUILayout.Width(40)))
+                                {
+                                    Scene scene;
+                                    if (Event.current.control)
+                                    {
+                                        scene = bc.scenes[k];
+                                        bc.scenes[k] = bc.scenes[0];
+                                        bc.scenes[0] = scene;
+                                    }
+                                    else
+                                    {
+                                        scene = bc.scenes[k];
+                                        bc.scenes[k] = bc.scenes[k - 1];
+                                        bc.scenes[k - 1] = scene;
+                                    }
+                                }
+                                GUI.enabled = k < bc.scenes.Count - 1;
+                                if (GUILayout.Button("Down", EditorStyles.miniButtonRight, GUILayout.Width(40)))
+                                {
+                                    Scene scene = bc.scenes[k];
+                                    bc.scenes[k] = bc.scenes[k + 1];
+                                    bc.scenes[k + 1] = scene;
+                                }
+                                GUI.enabled = true;
+                                if (!bc.scenes[k].isFound)
+                                {
+                                    if (GUILayout.Button("Locate", EditorStyles.miniButtonLeft, GUILayout.Width(75)))
+                                    {
+                                        string file = EditorUtility.OpenFilePanel("Locate " + bc.scenes[k].Name, Application.dataPath, "unity");
+                                        file = "Assets" + file.Replace(Application.dataPath, "");
+                                        if (bc.scenes.Count(scene => scene.Path == file) > 0)
+                                        {
+                                            bc.scenes.RemoveAt(k);
+                                        }
+                                        else
+                                        {
+                                            bc.scenes[k].Path = file;
+                                            bc.scenes[k].isFound = true;
+                                        }
+                                    }
+                                    GUI.backgroundColor = Color.red;
+                                    if (GUILayout.Button("Remove", EditorStyles.miniButtonRight, GUILayout.Width(75)))
+                                    {
+                                        bc.scenes.RemoveAt(k);
+                                    }
+                                    GUI.backgroundColor = _defaultGuiColor;
+                                }
+                                GUILayout.FlexibleSpace();
+                                EditorGUILayout.EndHorizontal();
+                            }
+
+                            EditorGUI.indentLevel--;
+                            #endregion
+                            #region ExcludedScenes
+                            EditorGUILayout.LabelField("Excluded", EditorStyles.boldLabel);
+                            EditorGUI.indentLevel++;
+                            for (int k = 0; k < _sceneList.Length; k++)
+                            {
+                                if (!bc.scenes.Contains(_sceneList[k]))
+                                {
+                                    if (EditorGUILayout.ToggleLeft(_sceneList[k].Name, false))
+                                    {
+                                        if (!bc.scenes.Contains(_sceneList[k]))
+                                        {
+                                            bc.scenes.Add(_sceneList[k]);
+                                        }
+                                    }
+                                }
+                            }
+                            EditorGUI.indentLevel--;
+                            #endregion
+                        }
+                        EditorGUILayout.EndVertical();
+                        #endregion
+                        EditorGUILayout.EndVertical();
+                        GUI.enabled = true;
+                    }
+                    #endregion
+                }
+                #endregion
+
+                #region Build
+                //Disable build button if there are no enabled builds.
+                GUI.enabled = _builds.Count(build => build.enabled == true) > 0;
+
+                EditorGUILayout.BeginHorizontal();
+                GUILayout.Label("Build Folder : ", GUILayout.Width(95));
+                if (string.IsNullOrEmpty(_mainBuildPath))
+                {
+                    GUILayout.Label("Choose Folder", GUILayout.MaxWidth(window.position.width - 250));
+                    if (GUILayout.Button("...", EditorStyles.miniButtonLeft, GUILayout.Width(25))) { _mainBuildPath = EditorUtility.OpenFolderPanel("Select folder", _mainBuildPath, _mainBuildPath) + "/"; }
+                    GUI.enabled = false;
+                }
+                else
+                {
+                    GUILayout.Label(_mainBuildPath, GUILayout.MaxWidth(window.position.width - 250));
+                    if (GUILayout.Button("...", EditorStyles.miniButtonLeft, GUILayout.Width(25))) { EditorUtility.OpenFolderPanel("Select folder", EditorApplication.applicationPath, ""); }
+                }
+
+                if (GUILayout.Button("Browse", EditorStyles.miniButtonRight, GUILayout.Width(100))) { EditorUtility.RevealInFinder(_mainBuildPath); }
+                EditorGUILayout.EndHorizontal();
+
+                EditorGUILayout.BeginHorizontal();
+                float buildButtonSize = 100;
+                //Center build button.
+                GUILayout.Space(window.position.width * 0.5f - buildButtonSize * 0.5f);
+                if (GUILayout.Button("Start Build", GUILayout.Width(buildButtonSize)))
+                {
+                    SelectBuildPath();
+                    EditorGUILayout.EndScrollView();
+                    Build();
+                    isScrollAlive = false;
+                    return;
+                }
+                EditorGUILayout.EndHorizontal();
+
+                GUI.enabled = true;
+                #endregion
+
+                if (isScrollAlive) EditorGUILayout.EndScrollView();
+                if (window) EditorUtility.SetDirty(window);
+            }
+        }
     }
 }
