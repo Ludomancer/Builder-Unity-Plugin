@@ -68,13 +68,21 @@ class BuildConfiguration
         return bc;
     }
 
+    //Custom defines.
     public string customDefineSymbols;
+    // Build options.
     public BuildOptions options = BuildOptions.None;
+    // Target platform.
     public BuildTarget target = BuildTarget.Android;
+    // Target GLES setting for Android and iOS
+    public TargetGlesGraphics targetGlesGraphics = TargetGlesGraphics.Automatic;
+    // List of scenes.
     public List<Scene> scenes = new List<Scene>();
+    //UI stuff
     public bool scenesToggle = true;
     public bool toggle = true;
     public bool enabled = true;
     public string name = "No Name";
+    //UNique ID
     public string uniqueId;
 }
