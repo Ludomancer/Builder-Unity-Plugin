@@ -4,7 +4,7 @@ Builder
 ###Unity BuildPipeline Automation Tool
 
 + Builder is a BuildPipeline automation tool for Unity3D. 
-+ Builder requires **UnityPro** to function. [(More info)] (http://docs.unity3d.com/ScriptReference/BuildPipeline.html)
++ Builder requires Unity 5 or UnityPro for any version below Unity 5 to function. [(More info)] (http://docs.unity3d.com/ScriptReference/BuildPipeline.html)
 + You are **encouraged** to contribute to the project!
 + Tested on Windows 7,8 and 10. It should also work on other systems in theory ^^
 
