@@ -317,7 +317,7 @@ public class Builder : EditorWindow
             build.Add("androidKeyStoreAlias", bc.androidKeyStoreAlias);
             build.Add("androidKeyStorePath", bc.androidKeyStorePath);
             build.Add("scenes", scenePaths);
-            build.Add("target", bc.Target);
+            build.Add("target", bc.target);
             build.Add("options", bc.options);
             build.Add("scenesToggle", bc.scenesToggle);
             build.Add("toggle", bc.toggle);
@@ -437,7 +437,7 @@ public class Builder : EditorWindow
             case LoadMode.ProjectFolder:
                 string[] appPath = Application.dataPath.Split("/"[0]);
                 filePath = Path.Combine(Application.dataPath.Substring(0, Application.dataPath.LastIndexOf("/")), appPath[appPath.Length - 2] + "-Nidre.Builder.ini");
-                serialized = System.IO.File.ReadAllText(filePath);
+                if (!!string.IsNullOrEmpty(filePath)) serialized = System.IO.File.ReadAllText(filePath);
                 break;
         }
 
@@ -484,8 +484,8 @@ public class Builder : EditorWindow
                     }
                     bc.name = buildConf["name"] as string;
                     bc.options = (BuildOptions)Enum.Parse(typeof(BuildOptions), buildConf["options"] as string);
-                    bc.Target = (BuildTarget)Enum.Parse(typeof(BuildTarget), buildConf["target"] as string);
-                    if(buildConf.ContainsKey("androidKeyStoreAlias")) bc.androidKeyStoreAlias = buildConf["androidKeyStoreAlias"] as string;
+                    bc.target = (BuildTarget)Enum.Parse(typeof(BuildTarget), buildConf["target"] as string);
+                    if (buildConf.ContainsKey("androidKeyStoreAlias")) bc.androidKeyStoreAlias = buildConf["androidKeyStoreAlias"] as string;
                     if (buildConf.ContainsKey("androidKeyStorePath")) bc.androidKeyStorePath = buildConf["androidKeyStorePath"] as string;
                     bc.scenesToggle = (bool)buildConf["scenesToggle"];
                     bc.toggle = (bool)buildConf["toggle"];
@@ -661,8 +661,8 @@ public class Builder : EditorWindow
         switch (_sortMode)
         {
             case SortMode.ByPlatform:
-                if (_sortDirection == SortDirection.Ascending) _builds = _builds.OrderBy(build => build.Target).ToList();
-                else _builds = _builds.OrderByDescending(build => build.Target).ToList();
+                if (_sortDirection == SortDirection.Ascending) _builds = _builds.OrderBy(build => build.target).ToList();
+                else _builds = _builds.OrderByDescending(build => build.target).ToList();
                 break;
             case SortMode.ByName:
                 if (_sortDirection == SortDirection.Ascending) _builds = _builds.OrderBy(build => build.name).ToList();
@@ -712,10 +712,10 @@ public class Builder : EditorWindow
             if (_resetTarget)
             {
                 //If the current target is as same as initial target.
-                if (bc.Target.Equals(_switchBackTo))
+                if (bc.target.Equals(_switchBackTo))
                 {
                     //If there are other build targets
-                    if (_toBeBuild.Count(build => build.Target != _switchBackTo) > 0)
+                    if (_toBeBuild.Count(build => build.target != _switchBackTo) > 0)
                     {
                         //Add current item to the end of the list and skip to next item.
                         _toBeBuild.Add(bc);
@@ -738,7 +738,7 @@ public class Builder : EditorWindow
                 TargetGlesGraphics targetGlesGraphicsBackup = TargetGlesGraphics.Automatic;
                 BuildTargetGroup currentBuildTargetGroup;
                 bool isBuildGroupUnkown = false;
-                switch (bc.Target)
+                switch (bc.target)
                 {
                     case BuildTarget.Android:
                         currentBuildTargetGroup = BuildTargetGroup.Android;
@@ -873,7 +873,7 @@ public class Builder : EditorWindow
                 }
 
                 //Prepare path
-                string buildPath = Path.Combine(_mainBuildPath, bc.Target.ToString());
+                string buildPath = Path.Combine(_mainBuildPath, bc.target.ToString());
                 buildPath = Path.Combine(buildPath, bc.name + " " + _timeStamp);
                 if (!Directory.Exists(buildPath)) Directory.CreateDirectory(buildPath);
                 buildPath = Path.Combine(buildPath, bc.name + "-" + bc.uniqueId + extension);
@@ -888,7 +888,7 @@ public class Builder : EditorWindow
 
                 Debug.Log("Building...");
                 Debug.Log("Path : " + buildPath);
-                string buildMessage = BuildPipeline.BuildPlayer(scenePaths, buildPath, bc.Target, bc.options);
+                string buildMessage = BuildPipeline.BuildPlayer(scenePaths, buildPath, bc.target, bc.options);
                 if (!string.IsNullOrEmpty(buildMessage))
                 {
                     Debug.LogError("Build Failed : " + buildMessage);
@@ -1175,7 +1175,7 @@ public class Builder : EditorWindow
 
                     GUILayout.Space(65);
                     bc.name = EditorGUILayout.TextField(bc.name);
-                    bc.Target = (BuildTarget)EditorGUILayout.EnumPopup("", bc.Target, GUILayout.MaxWidth(150));
+                    bc.target = (BuildTarget)EditorGUILayout.EnumPopup("", bc.target, GUILayout.MaxWidth(150));
                     EditorGUILayout.SelectableLabel(selectedScenes);
                     GUILayout.FlexibleSpace();
                     #endregion
@@ -1226,7 +1226,7 @@ public class Builder : EditorWindow
                         EditorGUI.indentLevel++;
                         EditorGUILayout.LabelField("Platform Specific", GUILayout.Width(125));
                         EditorGUI.indentLevel++;
-                        switch (bc.Target)
+                        switch (bc.target)
                         {
                             case BuildTarget.Android:
                                 //Very ugly code due to Unity Editor GUI limitations. I couldn't find something cleaner. Let me know if anyone finds anything!
@@ -1292,7 +1292,7 @@ public class Builder : EditorWindow
                         }
                         EditorGUILayout.EndHorizontal();
 
-                        if (bc.target == BuildTarget.Android || bc.target == BuildTarget.iPhone || bc.target == BuildTarget.BlackBerry)
+                        if (bc.target == BuildTarget.Android || bc.target == BuildTarget.iOS || bc.target == BuildTarget.BlackBerry)
                         {
                             EditorGUILayout.BeginHorizontal();
                             EditorGUILayout.LabelField("Graphics Level", GUILayout.Width(125));

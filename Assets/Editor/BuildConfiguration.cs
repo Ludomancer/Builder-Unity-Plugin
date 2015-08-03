@@ -39,24 +39,6 @@ internal class BuildConfiguration
     public string androidKeyStorePass = "";
     public string androidKeyStoreAlias = "";
     public string androidKeyStoreAliasPass = "";
-    public string customDefineSymbols;
-    public BuildOptions options = BuildOptions.None;
-    private BuildTarget _target = BuildTarget.Android;
-    public List<Scene> scenes = new List<Scene>();
-    public bool scenesToggle = true;
-    public bool toggle = true;
-    public bool enabled = true;
-    public string name = "No Name";
-    public string uniqueId;
-
-    public BuildTarget Target
-    {
-        get { return _target; }
-        set
-        {
-            _target = value;
-        }
-    }
 
     public BuildConfiguration(BuildOptions options, string customDefineSymbols)
     {
@@ -67,7 +49,7 @@ internal class BuildConfiguration
 
     public BuildConfiguration(BuildTarget target, BuildOptions options)
     {
-        this.Target = target;
+        this.target = target;
         this.options = options;
         this.uniqueId = UnityEngine.Random.Range(0, 1000000).ToString("000000");
     }
@@ -80,7 +62,7 @@ internal class BuildConfiguration
 
     public BuildConfiguration Copy()
     {
-        BuildConfiguration bc = new BuildConfiguration(Target, options);
+        BuildConfiguration bc = new BuildConfiguration(target, options);
         bc.scenes = scenes;
         bc.scenesToggle = scenesToggle;
         bc.enabled = enabled;
@@ -104,6 +86,6 @@ internal class BuildConfiguration
     public bool toggle = true;
     public bool enabled = true;
     public string name = "No Name";
-    //UNique ID
+    //Unique ID
     public string uniqueId;
 }
