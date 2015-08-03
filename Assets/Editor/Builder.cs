@@ -256,7 +256,7 @@ public class Builder : EditorWindow
     {
         //Load all scenes specified in EditorBuildSettings 
         List<Scene> temp = new List<Scene>();
-        foreach (UnityEditor.EditorBuildSettingsScene scene in UnityEditor.EditorBuildSettings.scenes)
+        foreach (EditorBuildSettingsScene scene in EditorBuildSettings.scenes)
         {
             if (File.Exists(scene.path))
             {
@@ -314,9 +314,10 @@ public class Builder : EditorWindow
             {
                 scenePaths[p] = bc.scenes[p].Path;
             }
-
+            build.Add("androidKeyStoreAlias", bc.androidKeyStoreAlias);
+            build.Add("androidKeyStorePath", bc.androidKeyStorePath);
             build.Add("scenes", scenePaths);
-            build.Add("target", bc.target);
+            build.Add("target", bc.Target);
             build.Add("options", bc.options);
             build.Add("scenesToggle", bc.scenesToggle);
             build.Add("toggle", bc.toggle);
@@ -483,7 +484,9 @@ public class Builder : EditorWindow
                     }
                     bc.name = buildConf["name"] as string;
                     bc.options = (BuildOptions)Enum.Parse(typeof(BuildOptions), buildConf["options"] as string);
-                    bc.target = (BuildTarget)Enum.Parse(typeof(BuildTarget), buildConf["target"] as string);
+                    bc.Target = (BuildTarget)Enum.Parse(typeof(BuildTarget), buildConf["target"] as string);
+                    if(buildConf.ContainsKey("androidKeyStoreAlias")) bc.androidKeyStoreAlias = buildConf["androidKeyStoreAlias"] as string;
+                    if (buildConf.ContainsKey("androidKeyStorePath")) bc.androidKeyStorePath = buildConf["androidKeyStorePath"] as string;
                     bc.scenesToggle = (bool)buildConf["scenesToggle"];
                     bc.toggle = (bool)buildConf["toggle"];
                     bc.enabled = (bool)buildConf["enabled"];
@@ -658,8 +661,8 @@ public class Builder : EditorWindow
         switch (_sortMode)
         {
             case SortMode.ByPlatform:
-                if (_sortDirection == SortDirection.Ascending) _builds = _builds.OrderBy(build => build.target).ToList();
-                else _builds = _builds.OrderByDescending(build => build.target).ToList();
+                if (_sortDirection == SortDirection.Ascending) _builds = _builds.OrderBy(build => build.Target).ToList();
+                else _builds = _builds.OrderByDescending(build => build.Target).ToList();
                 break;
             case SortMode.ByName:
                 if (_sortDirection == SortDirection.Ascending) _builds = _builds.OrderBy(build => build.name).ToList();
@@ -709,10 +712,10 @@ public class Builder : EditorWindow
             if (_resetTarget)
             {
                 //If the current target is as same as initial target.
-                if (bc.target.Equals(_switchBackTo))
+                if (bc.Target.Equals(_switchBackTo))
                 {
                     //If there are other build targets
-                    if (_toBeBuild.Count(build => build.target != _switchBackTo) > 0)
+                    if (_toBeBuild.Count(build => build.Target != _switchBackTo) > 0)
                     {
                         //Add current item to the end of the list and skip to next item.
                         _toBeBuild.Add(bc);
@@ -735,28 +738,36 @@ public class Builder : EditorWindow
                 TargetGlesGraphics targetGlesGraphicsBackup = TargetGlesGraphics.Automatic;
                 BuildTargetGroup currentBuildTargetGroup;
                 bool isBuildGroupUnkown = false;
-                switch (bc.target)
+                switch (bc.Target)
                 {
                     case BuildTarget.Android:
                         currentBuildTargetGroup = BuildTargetGroup.Android;
                         extension = ".apk";
+                        PlayerSettings.Android.keystoreName = bc.androidKeyStorePath;
+                        PlayerSettings.Android.keystorePass = bc.androidKeyStorePass;
+                        PlayerSettings.Android.keyaliasName = bc.androidKeyStoreAlias;
+                        PlayerSettings.Android.keyaliasPass = bc.androidKeyStoreAliasPass;
                         break;
                     case BuildTarget.BlackBerry:
                         currentBuildTargetGroup = BuildTargetGroup.BlackBerry;
                         //Not implemented.
                         break;
+#if UNITY_4
                     case BuildTarget.FlashPlayer:
                         currentBuildTargetGroup = BuildTargetGroup.FlashPlayer;
                         //Not implemented. flv?
                         break;
+#endif
                     case BuildTarget.MetroPlayer:
                         currentBuildTargetGroup = BuildTargetGroup.Metro;
                         //Not implemented.
                         break;
+#if UNITY_4_2 ||  UNITY_4_1 ||  UNITY_4_0
                     case BuildTarget.NaCl:
                         currentBuildTargetGroup = BuildTargetGroup.NaCl;
                         //Not implemented.
                         break;
+#endif
                     case BuildTarget.PS3:
                         currentBuildTargetGroup = BuildTargetGroup.PS3;
                         //Not implemented.
@@ -837,14 +848,14 @@ public class Builder : EditorWindow
                         currentBuildTargetGroup = BuildTargetGroup.XboxOne;
                         //Not implemented.
                         break;
-                    case BuildTarget.iPhone:
-                        currentBuildTargetGroup = BuildTargetGroup.iPhone;
+                    case BuildTarget.iOS:
+                        currentBuildTargetGroup = BuildTargetGroup.iOS;
                         //Not implemented.
                         break;
                     default:
                         //Make compiler happy. We can't have it undefined so we just but a dummy define in default which is not likely to be fired as long as
                         //this switch case is maintained with new platforms added. 
-                        currentBuildTargetGroup = BuildTargetGroup.BB10;
+                        currentBuildTargetGroup = BuildTargetGroup.Android;
                         isBuildGroupUnkown = true;
                         break;
                 }
@@ -862,10 +873,10 @@ public class Builder : EditorWindow
                 }
 
                 //Prepare path
-                string buildPath = Path.Combine(_mainBuildPath, bc.target.ToString());
-                buildPath = Path.Combine(buildPath, bc.name.ToString() + " " + _timeStamp);
+                string buildPath = Path.Combine(_mainBuildPath, bc.Target.ToString());
+                buildPath = Path.Combine(buildPath, bc.name + " " + _timeStamp);
                 if (!Directory.Exists(buildPath)) Directory.CreateDirectory(buildPath);
-                buildPath = Path.Combine(buildPath, bc.name.ToString() + "-" + bc.uniqueId + extension);
+                buildPath = Path.Combine(buildPath, bc.name + "-" + bc.uniqueId + extension);
 
                 Debug.Log("Preparing scenes...");
                 //Store scene paths
@@ -877,7 +888,7 @@ public class Builder : EditorWindow
 
                 Debug.Log("Building...");
                 Debug.Log("Path : " + buildPath);
-                string buildMessage = BuildPipeline.BuildPlayer(scenePaths, buildPath, bc.target, bc.options);
+                string buildMessage = BuildPipeline.BuildPlayer(scenePaths, buildPath, bc.Target, bc.options);
                 if (!string.IsNullOrEmpty(buildMessage))
                 {
                     Debug.LogError("Build Failed : " + buildMessage);
@@ -1164,7 +1175,7 @@ public class Builder : EditorWindow
 
                     GUILayout.Space(65);
                     bc.name = EditorGUILayout.TextField(bc.name);
-                    bc.target = (BuildTarget)EditorGUILayout.EnumPopup("", bc.target, GUILayout.MaxWidth(150));
+                    bc.Target = (BuildTarget)EditorGUILayout.EnumPopup("", bc.Target, GUILayout.MaxWidth(150));
                     EditorGUILayout.SelectableLabel(selectedScenes);
                     GUILayout.FlexibleSpace();
                     #endregion
@@ -1212,7 +1223,45 @@ public class Builder : EditorWindow
                     {
                         EditorGUILayout.BeginVertical();
                         GUI.enabled = bc.enabled;
-
+                        EditorGUI.indentLevel++;
+                        EditorGUILayout.LabelField("Platform Specific", GUILayout.Width(125));
+                        EditorGUI.indentLevel++;
+                        switch (bc.Target)
+                        {
+                            case BuildTarget.Android:
+                                //Very ugly code due to Unity Editor GUI limitations. I couldn't find something cleaner. Let me know if anyone finds anything!
+                                //Very hard to modularize this part per platform with Unity Editor GUI.
+                                EditorGUILayout.BeginVertical();
+                                EditorGUILayout.LabelField("Singing");
+                                EditorGUILayout.BeginHorizontal();
+                                EditorGUILayout.LabelField("Keystore File : ", GUILayout.Width(170));
+                                if (string.IsNullOrEmpty(bc.androidKeyStorePath) || bc.androidKeyStorePath.Equals(@"NULL"))
+                                {
+                                    EditorGUILayout.LabelField("Choose Keystore", GUILayout.MaxWidth(150));
+                                }
+                                else
+                                {
+                                    EditorGUILayout.LabelField(bc.androidKeyStorePath, GUILayout.MaxWidth(window.position.width - 95 - 25 - 20));
+                                }
+                                if (GUILayout.Button("...", EditorStyles.miniButton, GUILayout.Width(25))) { bc.androidKeyStorePath = EditorUtility.OpenFilePanel("Select Keystore File", bc.androidKeyStorePath, "keystore"); }
+                                EditorGUILayout.EndHorizontal();
+                                EditorGUILayout.BeginHorizontal();
+                                EditorGUILayout.LabelField("Keystore Password : ", GUILayout.Width(200));
+                                bc.androidKeyStorePass = GUILayout.PasswordField(bc.androidKeyStorePass, '*', GUILayout.MaxWidth(125));
+                                EditorGUILayout.EndHorizontal();
+                                EditorGUILayout.BeginHorizontal();
+                                EditorGUILayout.LabelField("Keystore Alias : ", GUILayout.Width(200));
+                                bc.androidKeyStoreAlias = GUILayout.TextField(bc.androidKeyStoreAlias, GUILayout.MaxWidth(125));
+                                EditorGUILayout.EndHorizontal();
+                                EditorGUILayout.BeginHorizontal();
+                                EditorGUILayout.LabelField("Keystore Alias Password : ", GUILayout.Width(200));
+                                bc.androidKeyStoreAliasPass = GUILayout.PasswordField(bc.androidKeyStoreAliasPass, '*', GUILayout.MaxWidth(125));
+                                EditorGUILayout.EndHorizontal();
+                                EditorGUILayout.EndVertical();
+                                break;
+                        }
+                        EditorGUI.indentLevel--;
+                        EditorGUI.indentLevel--;
                         EditorGUI.indentLevel++;
                         EditorGUILayout.BeginHorizontal();
                         EditorGUILayout.LabelField("Build Options", GUILayout.Width(125));
@@ -1254,7 +1303,27 @@ public class Builder : EditorWindow
 
                         #region SceneList
                         EditorGUILayout.BeginVertical();
+                        EditorGUILayout.BeginHorizontal();
                         bc.scenesToggle = EditorGUILayout.Foldout(bc.scenesToggle, "Scenes " + selectedScenes);
+                        GUILayout.FlexibleSpace();
+                        if (GUILayout.Button("Select All", EditorStyles.miniButtonLeft, GUILayout.Width(125)))
+                        {
+                            for (int k = 0; k < _sceneList.Length; k++)
+                            {
+                                if (!bc.scenes.Contains(_sceneList[k]))
+                                {
+                                    bc.scenes.Add(_sceneList[k]);
+                                }
+                            }
+                        }
+                        if (GUILayout.Button("Select None", EditorStyles.miniButtonRight, GUILayout.Width(125)))
+                        {
+                            for (int k = 0; k < _sceneList.Length; k++)
+                            {
+                                bc.scenes.Remove(_sceneList[k]);
+                            }
+                        }
+                        EditorGUILayout.EndHorizontal();
                         EditorGUI.indentLevel++;
                         if (bc.scenesToggle)
                         {
@@ -1339,10 +1408,7 @@ public class Builder : EditorWindow
                                 {
                                     if (EditorGUILayout.ToggleLeft(_sceneList[k].Name, false))
                                     {
-                                        if (!bc.scenes.Contains(_sceneList[k]))
-                                        {
-                                            bc.scenes.Add(_sceneList[k]);
-                                        }
+                                        bc.scenes.Add(_sceneList[k]);
                                     }
                                 }
                             }
