@@ -34,7 +34,7 @@ using System.Collections.Generic;
 using System.IO;
 using System;
 using System.Linq;
-[Serializable]
+[Serializable, InitializeOnLoad]
 public class Builder : EditorWindow
 {
     // How to save the configuration file.
@@ -43,7 +43,8 @@ public class Builder : EditorWindow
         AsDefault,
         Overwrite,
         SaveAs,
-        PreCompile
+        PreCompile,
+        ProjectFolder
     }
 
     // How to load the configuration file.
@@ -52,7 +53,8 @@ public class Builder : EditorWindow
         Default,
         AskForPath,
         Args,
-        PostCompile
+        PostCompile,
+        ProjectFolder
     }
 
     // Sort mode for the build list.
@@ -119,28 +121,61 @@ public class Builder : EditorWindow
     //Nasty bug thingy
     static bool isScrollAlive;
 
+    //ctor called when Unity is loaded.
+    static Builder()
+    {
+        //Ignore init if this is a recompile sicne we handle it differently.
+        string dirPath = Path.Combine(GetDefaultDirPath(), "PreCompile.ini");
+        if (!File.Exists(dirPath))
+        {
+            EditorApplication.update += DelayedConstructor;
+        }
+        EditorApplication.update += EditorUpdate;
+
+    }
+
+    private static void DelayedConstructor()
+    {
+        EditorApplication.update -= DelayedConstructor;
+        //Only load if the Builder is already opened.
+        if (IsAlreadyOpened())
+        {
+            if (_builds != null) _builds.Clear();
+            _preCompileConfSaved = false;
+            LoadToolSettings();
+            LoadSettings(LoadMode.ProjectFolder);
+            //Load scenes
+            RefreshSceneList();
+            window = GetWindowWithoutFocus();
+        }
+    }
+
     [MenuItem("Window/Builder")]
     static void ShowWindow()
     {
-        if (_builds != null) _builds.Clear();
-
-        //Load settings and default configuration
-        LoadToolSettings();
-        LoadSettings(LoadMode.Default);
-
-        //Load Failed
-        if (_builds == null)
+        if (!window)
         {
-            _builds = new List<BuildConfiguration>();
-            _builds.Add(new BuildConfiguration(_defaultBuildOptions, _defaultDefineSymbols));
-            SaveSettings(SaveMode.AsDefault);
+            if (_builds != null) _builds.Clear();
+
+            //Load settings and default configuration
+            LoadToolSettings();
+            LoadSettings(LoadMode.ProjectFolder);
+
+            //Load Failed
+            if (_builds == null)
+            {
+                _builds = new List<BuildConfiguration>();
+                _builds.Add(new BuildConfiguration(_defaultBuildOptions, _defaultDefineSymbols));
+                SaveSettings(SaveMode.AsDefault);
+            }
+
+            //Load scenes
+            RefreshSceneList();
+
+            window = GetWindow();
+            window.Repaint();
         }
-
-        //Load scenes
-        RefreshSceneList();
-
-        window = (Builder)EditorWindow.GetWindow(typeof(Builder));
-        window.Repaint();
+        else window.Focus();
     }
 
     /// <summary>
@@ -154,14 +189,45 @@ public class Builder : EditorWindow
         {
             if (_builds != null) _builds.Clear();
             _preCompileConfSaved = false;
+            //Order is important. Calling ToolSettings after Settings makes sure Title is updated correctly instead of PreCompile.ini.
             LoadSettings(LoadMode.PostCompile);
             LoadToolSettings();
             //Load scenes
             RefreshSceneList();
-            window = (Builder)EditorWindow.GetWindow(typeof(Builder));
+            window = GetWindowWithoutFocus();
             window.Repaint();
         }
     }
+
+    /// <summary>
+    /// Is Builder already opened.
+    /// </summary>
+    /// <returns>Returns true if any isntance of Builder found</returns>
+    private static bool IsAlreadyOpened()
+    {
+        Builder[] builderWindows = Resources.FindObjectsOfTypeAll<Builder>();
+        return builderWindows.Length > 0;
+    }
+    /// <summary>
+    /// Returns active Builder window withtou changing focus if it exists.
+    /// </summary>
+    /// <returns>Returns active Builder window withtou changing focus if it exists.</returns>
+    private static Builder GetWindowWithoutFocus()
+    {
+        Builder[] builderWindows = Resources.FindObjectsOfTypeAll<Builder>();
+        if (builderWindows.Length > 0) return builderWindows[0];
+        else return null;
+    }
+
+    /// <summary>
+    /// Return Builder window, create if does not exists.
+    /// </summary>
+    /// <returns>Return builder window</returns>
+    private static Builder GetWindow()
+    {
+        return (Builder)EditorWindow.GetWindow(typeof(Builder));
+    }
+
 
     /// <summary>
     /// Return default app data dir path.
@@ -251,16 +317,18 @@ public class Builder : EditorWindow
             build.Add("androidKeyStoreAlias", bc.androidKeyStoreAlias);
             build.Add("androidKeyStorePath", bc.androidKeyStorePath);
             build.Add("scenes", scenePaths);
-            build.Add("target", bc.Target);
+            build.Add("target", bc.target);
             build.Add("options", bc.options);
             build.Add("scenesToggle", bc.scenesToggle);
             build.Add("toggle", bc.toggle);
             build.Add("enabled", bc.enabled);
             build.Add("uniqueId", bc.uniqueId);
             build.Add("customDefineSymbols", bc.customDefineSymbols);
+            build.Add("targetGlesGraphics", bc.targetGlesGraphics);
             settings.Add("build" + i, build);
         }
         string savePath = string.Empty;
+        string[] appPath;
         switch (saveMode)
         {
             case SaveMode.AsDefault:
@@ -272,7 +340,7 @@ public class Builder : EditorWindow
                 savePath = mostRecentConfiguration;
                 break;
             case SaveMode.SaveAs:
-                string[] appPath = Application.dataPath.Split("/"[0]);
+                appPath = Application.dataPath.Split("/"[0]);
                 string temp = EditorUtility.SaveFilePanel("Save Configuration", GetDefaultDirPath(), appPath[appPath.Length - 2], "ini");
                 if (!string.IsNullOrEmpty(temp))
                 {
@@ -285,7 +353,14 @@ public class Builder : EditorWindow
             case SaveMode.PreCompile:
                 savePath = Path.Combine(GetDefaultDirPath(), "PreCompile.ini");
                 break;
+            case SaveMode.ProjectFolder:
+                appPath = Application.dataPath.Split("/"[0]);
+                savePath = Path.Combine(Application.dataPath.Substring(0, Application.dataPath.LastIndexOf("/")), appPath[appPath.Length - 2] + "-Nidre.Builder.ini");
+                mostRecentConfiguration = savePath;
+                mostRecentConfigurationName = Path.GetFileName(mostRecentConfiguration);
+                break;
         }
+        appPath = null;
 
         if (!string.IsNullOrEmpty(savePath))
         {
@@ -317,7 +392,7 @@ public class Builder : EditorWindow
             case LoadMode.Default:
                 string dirPath = GetDefaultDirPath();
                 filePath = Path.Combine(dirPath, "Default.ini");
-                // Create initial golder structure
+                // Create initial folder structure
                 if (!Directory.Exists(dirPath)) Directory.CreateDirectory(dirPath);
                 // Save default settings
                 if (!File.Exists(filePath))
@@ -358,6 +433,11 @@ public class Builder : EditorWindow
                 filePath = Path.Combine(GetDefaultDirPath(), "PreCompile.ini");
                 serialized = System.IO.File.ReadAllText(filePath);
                 File.Delete(filePath);
+                break;
+            case LoadMode.ProjectFolder:
+                string[] appPath = Application.dataPath.Split("/"[0]);
+                filePath = Path.Combine(Application.dataPath.Substring(0, Application.dataPath.LastIndexOf("/")), appPath[appPath.Length - 2] + "-Nidre.Builder.ini");
+                if (!!string.IsNullOrEmpty(filePath)) serialized = System.IO.File.ReadAllText(filePath);
                 break;
         }
 
@@ -404,17 +484,15 @@ public class Builder : EditorWindow
                     }
                     bc.name = buildConf["name"] as string;
                     bc.options = (BuildOptions)Enum.Parse(typeof(BuildOptions), buildConf["options"] as string);
-                    bc.Target = (BuildTarget)Enum.Parse(typeof(BuildTarget), buildConf["target"] as string);
-                    if(buildConf.ContainsKey("androidKeyStoreAlias")) bc.androidKeyStoreAlias = buildConf["androidKeyStoreAlias"] as string;
+                    bc.target = (BuildTarget)Enum.Parse(typeof(BuildTarget), buildConf["target"] as string);
+                    if (buildConf.ContainsKey("androidKeyStoreAlias")) bc.androidKeyStoreAlias = buildConf["androidKeyStoreAlias"] as string;
                     if (buildConf.ContainsKey("androidKeyStorePath")) bc.androidKeyStorePath = buildConf["androidKeyStorePath"] as string;
                     bc.scenesToggle = (bool)buildConf["scenesToggle"];
                     bc.toggle = (bool)buildConf["toggle"];
                     bc.enabled = (bool)buildConf["enabled"];
                     bc.uniqueId = int.Parse(buildConf["uniqueId"] as string).ToString("000000");
-                    if (buildConf.ContainsKey("customDefineSymbols"))
-                    {
-                        bc.customDefineSymbols = buildConf["customDefineSymbols"] as string;
-                    }
+                    if (buildConf.ContainsKey("customDefineSymbols")) bc.customDefineSymbols = buildConf["customDefineSymbols"] as string;
+                    if (buildConf.ContainsKey("targetGlesGraphics")) bc.targetGlesGraphics = (TargetGlesGraphics)Enum.Parse(typeof(TargetGlesGraphics), buildConf["targetGlesGraphics"] as string);
                     _builds.Add(bc);
                 }
                 ApplySort();
@@ -454,6 +532,9 @@ public class Builder : EditorWindow
                             break;
                         case LoadMode.Args:
                             throw new FileLoadException("Can't read configuration!");
+                        case LoadMode.ProjectFolder:
+                            LoadSettings(LoadMode.Default);
+                            break;
                     }
                 }
                 Debug.LogException(e);
@@ -468,7 +549,7 @@ public class Builder : EditorWindow
     /// <summary>
     /// Saves the tool settings.
     /// </summary>
-    static void SaveToolSettings()
+    static void SaveToolSettings(bool isPreCompile)
     {
         string path = Path.Combine(GetDefaultDirPath(), "Settings.ini");
 
@@ -477,7 +558,7 @@ public class Builder : EditorWindow
         settings.Add("sortUtilsToggle", _sortUtilsToggle);
         settings.Add("toolOptionsToggle", _toolOptionsToggle);
         settings.Add("listUtilsToggle", _listUtilsToggle);
-        settings.Add("mostRecentConfiguration", mostRecentConfiguration);
+        if (isPreCompile) settings.Add("mostRecentConfiguration", mostRecentConfiguration);
 
         using (StreamWriter writer = new StreamWriter(path))
         {
@@ -497,7 +578,7 @@ public class Builder : EditorWindow
         if (!File.Exists(filePath))
         {
             File.Create(filePath).Close();
-            SaveToolSettings();
+            SaveToolSettings(false);
         }
         string serialized;
         using (StreamReader reader = new StreamReader(filePath))
@@ -516,7 +597,7 @@ public class Builder : EditorWindow
                 if (deserialized.ContainsKey("mostRecentConfiguration"))
                 {
                     mostRecentConfiguration = deserialized["mostRecentConfiguration"] as string;
-                    mostRecentConfigurationName = Path.GetFileName(mostRecentConfiguration);
+                    if (!string.IsNullOrEmpty(mostRecentConfiguration)) mostRecentConfigurationName = Path.GetFileName(mostRecentConfiguration);
                 }
             }
             catch (Exception e)
@@ -529,7 +610,7 @@ public class Builder : EditorWindow
                     e.GetType() == typeof(KeyNotFoundException))
                 {
                     _defaultBuildOptions = BuildOptions.None;
-                    SaveToolSettings();
+                    SaveToolSettings(false);
                 }
                 else Debug.LogException(e);
             }
@@ -547,7 +628,7 @@ public class Builder : EditorWindow
         _builds.Add(new BuildConfiguration(_defaultBuildOptions, _defaultDefineSymbols));
         SaveSettings(SaveMode.AsDefault);
         _defaultBuildOptions = BuildOptions.None;
-        SaveToolSettings();
+        SaveToolSettings(false);
     }
 
     /// <summary>
@@ -580,8 +661,8 @@ public class Builder : EditorWindow
         switch (_sortMode)
         {
             case SortMode.ByPlatform:
-                if (_sortDirection == SortDirection.Ascending) _builds = _builds.OrderBy(build => build.Target).ToList();
-                else _builds = _builds.OrderByDescending(build => build.Target).ToList();
+                if (_sortDirection == SortDirection.Ascending) _builds = _builds.OrderBy(build => build.target).ToList();
+                else _builds = _builds.OrderByDescending(build => build.target).ToList();
                 break;
             case SortMode.ByName:
                 if (_sortDirection == SortDirection.Ascending) _builds = _builds.OrderBy(build => build.name).ToList();
@@ -631,10 +712,10 @@ public class Builder : EditorWindow
             if (_resetTarget)
             {
                 //If the current target is as same as initial target.
-                if (bc.Target.Equals(_switchBackTo))
+                if (bc.target.Equals(_switchBackTo))
                 {
                     //If there are other build targets
-                    if (_toBeBuild.Count(build => build.Target != _switchBackTo) > 0)
+                    if (_toBeBuild.Count(build => build.target != _switchBackTo) > 0)
                     {
                         //Add current item to the end of the list and skip to next item.
                         _toBeBuild.Add(bc);
@@ -654,9 +735,10 @@ public class Builder : EditorWindow
 
                 string extension = String.Empty;
                 string defineSymbolsBackup = String.Empty;
+                TargetGlesGraphics targetGlesGraphicsBackup = TargetGlesGraphics.Automatic;
                 BuildTargetGroup currentBuildTargetGroup;
                 bool isBuildGroupUnkown = false;
-                switch (bc.Target)
+                switch (bc.target)
                 {
                     case BuildTarget.Android:
                         currentBuildTargetGroup = BuildTargetGroup.Android;
@@ -784,10 +866,14 @@ public class Builder : EditorWindow
                     //Change Build Symbols
                     defineSymbolsBackup = PlayerSettings.GetScriptingDefineSymbolsForGroup(currentBuildTargetGroup);
                     PlayerSettings.SetScriptingDefineSymbolsForGroup(currentBuildTargetGroup, bc.customDefineSymbols);
+
+                    //Change target GLES Graphics
+                    targetGlesGraphicsBackup = PlayerSettings.targetGlesGraphics;
+                    PlayerSettings.targetGlesGraphics = bc.targetGlesGraphics;
                 }
 
                 //Prepare path
-                string buildPath = Path.Combine(_mainBuildPath, bc.Target.ToString());
+                string buildPath = Path.Combine(_mainBuildPath, bc.target.ToString());
                 buildPath = Path.Combine(buildPath, bc.name + " " + _timeStamp);
                 if (!Directory.Exists(buildPath)) Directory.CreateDirectory(buildPath);
                 buildPath = Path.Combine(buildPath, bc.name + "-" + bc.uniqueId + extension);
@@ -802,7 +888,7 @@ public class Builder : EditorWindow
 
                 Debug.Log("Building...");
                 Debug.Log("Path : " + buildPath);
-                string buildMessage = BuildPipeline.BuildPlayer(scenePaths, buildPath, bc.Target, bc.options);
+                string buildMessage = BuildPipeline.BuildPlayer(scenePaths, buildPath, bc.target, bc.options);
                 if (!string.IsNullOrEmpty(buildMessage))
                 {
                     Debug.LogError("Build Failed : " + buildMessage);
@@ -813,6 +899,9 @@ public class Builder : EditorWindow
                 {
                     //Set Define Symbols to it's initial state before build.
                     PlayerSettings.SetScriptingDefineSymbolsForGroup(currentBuildTargetGroup, defineSymbolsBackup);
+
+                    //Set Target GLES Graphics to it's initial state before build.
+                    PlayerSettings.targetGlesGraphics = targetGlesGraphicsBackup;
                 }
 
                 Debug.Log(bc.name + " Done. (" + sw.ElapsedMilliseconds + "ms)");
@@ -830,7 +919,7 @@ public class Builder : EditorWindow
         _toBeBuild.Clear();
     }
 
-    void Update()
+    static void EditorUpdate()
     {
         //Check if Editor started compilation
         if (EditorApplication.isCompiling)
@@ -838,7 +927,7 @@ public class Builder : EditorWindow
             //Save current settings if we haven't already.
             if (!_preCompileConfSaved)
             {
-                SaveToolSettings();
+                SaveToolSettings(true);
                 SaveSettings(SaveMode.PreCompile);
                 _preCompileConfSaved = true;
             }
@@ -851,6 +940,7 @@ public class Builder : EditorWindow
         {
             if (_builds != null)
             {
+
                 #region PrepareGuiStyles
                 //Create a title style if we haven't already.
                 //Calling this piece of code outside of OnGUI throws an exception. That's why we do it here.
@@ -906,9 +996,13 @@ public class Builder : EditorWindow
                     }
                     else SaveSettings(SaveMode.Overwrite);
                 }
-                if (GUILayout.Button("Save As..", EditorStyles.miniButtonMid))
+                if (GUILayout.Button("Save As ...", EditorStyles.miniButtonMid))
                 {
                     SaveSettings(SaveMode.SaveAs);
+                }
+                if (GUILayout.Button("Save As Project Default", EditorStyles.miniButtonMid))
+                {
+                    SaveSettings(SaveMode.ProjectFolder);
                 }
                 if (GUILayout.Button("Load", EditorStyles.miniButtonRight))
                 {
@@ -960,7 +1054,7 @@ public class Builder : EditorWindow
 
                 bool prevToggle = _toolOptionsToggle;
                 _toolOptionsToggle = EditorGUILayout.Foldout(_toolOptionsToggle, "Tool Options");
-                if (!prevToggle.Equals(_toolOptionsToggle)) SaveToolSettings();
+                if (!prevToggle.Equals(_toolOptionsToggle)) SaveToolSettings(false);
 
                 if (_toolOptionsToggle)
                 {
@@ -978,7 +1072,7 @@ public class Builder : EditorWindow
 
                 prevToggle = _sortUtilsToggle;
                 _sortUtilsToggle = EditorGUILayout.Foldout(_sortUtilsToggle, "Sort Options");
-                if (!prevToggle.Equals(_sortUtilsToggle)) SaveToolSettings();
+                if (!prevToggle.Equals(_sortUtilsToggle)) SaveToolSettings(false);
                 if (_sortUtilsToggle)
                 {
                     EditorGUILayout.LabelField("Sort", EditorStyles.boldLabel, null);
@@ -1001,7 +1095,7 @@ public class Builder : EditorWindow
 
                 prevToggle = _listUtilsToggle;
                 _listUtilsToggle = EditorGUILayout.Foldout(_listUtilsToggle, "List Options");
-                if (!prevToggle.Equals(_listUtilsToggle)) SaveToolSettings();
+                if (!prevToggle.Equals(_listUtilsToggle)) SaveToolSettings(false);
                 if (_listUtilsToggle)
                 {
                     EditorGUILayout.LabelField("List Controls", EditorStyles.boldLabel, null);
@@ -1081,7 +1175,7 @@ public class Builder : EditorWindow
 
                     GUILayout.Space(65);
                     bc.name = EditorGUILayout.TextField(bc.name);
-                    bc.Target = (BuildTarget)EditorGUILayout.EnumPopup("", bc.Target, GUILayout.MaxWidth(150));
+                    bc.target = (BuildTarget)EditorGUILayout.EnumPopup("", bc.target, GUILayout.MaxWidth(150));
                     EditorGUILayout.SelectableLabel(selectedScenes);
                     GUILayout.FlexibleSpace();
                     #endregion
@@ -1132,7 +1226,7 @@ public class Builder : EditorWindow
                         EditorGUI.indentLevel++;
                         EditorGUILayout.LabelField("Platform Specific", GUILayout.Width(125));
                         EditorGUI.indentLevel++;
-                        switch (bc.Target)
+                        switch (bc.target)
                         {
                             case BuildTarget.Android:
                                 //Very ugly code due to Unity Editor GUI limitations. I couldn't find something cleaner. Let me know if anyone finds anything!
@@ -1171,12 +1265,12 @@ public class Builder : EditorWindow
                         EditorGUI.indentLevel++;
                         EditorGUILayout.BeginHorizontal();
                         EditorGUILayout.LabelField("Build Options", GUILayout.Width(125));
-                        bc.options = (BuildOptions)EditorGUILayout.EnumMaskField("", bc.options, GUILayout.Width(150));
+                        bc.options = (BuildOptions)EditorGUILayout.EnumMaskField("", bc.options);
                         GUILayout.FlexibleSpace();
                         if (GUILayout.Button("Make default"))
                         {
                             _defaultBuildOptions = bc.options;
-                            SaveToolSettings();
+                            SaveToolSettings(false);
                         }
                         EditorGUILayout.EndHorizontal();
 
@@ -1194,9 +1288,18 @@ public class Builder : EditorWindow
                         if (GUILayout.Button("Make default"))
                         {
                             _defaultDefineSymbols = bc.customDefineSymbols;
-                            SaveToolSettings();
+                            SaveToolSettings(false);
                         }
                         EditorGUILayout.EndHorizontal();
+
+                        if (bc.target == BuildTarget.Android || bc.target == BuildTarget.iOS || bc.target == BuildTarget.BlackBerry)
+                        {
+                            EditorGUILayout.BeginHorizontal();
+                            EditorGUILayout.LabelField("Graphics Level", GUILayout.Width(125));
+                            bc.targetGlesGraphics = (TargetGlesGraphics)EditorGUILayout.EnumPopup((Enum)bc.targetGlesGraphics);
+                            GUILayout.FlexibleSpace();
+                            EditorGUILayout.EndHorizontal();
+                        }
 
                         #region SceneList
                         EditorGUILayout.BeginVertical();
