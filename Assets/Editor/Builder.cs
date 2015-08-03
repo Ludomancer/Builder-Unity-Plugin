@@ -1439,7 +1439,11 @@ public class Builder : EditorWindow
                 else
                 {
                     GUILayout.Label(_mainBuildPath, GUILayout.MaxWidth(window.position.width - 250));
-                    if (GUILayout.Button("...", EditorStyles.miniButtonLeft, GUILayout.Width(25))) { EditorUtility.OpenFolderPanel("Select folder", EditorApplication.applicationPath, ""); }
+                    if (GUILayout.Button("...", EditorStyles.miniButtonLeft, GUILayout.Width(25)))
+                    {
+                        string newPath = EditorUtility.OpenFolderPanel("Select folder", EditorApplication.applicationPath, "");
+                        _mainBuildPath = string.IsNullOrEmpty(newPath) ? _mainBuildPath : newPath;
+                    }
                 }
 
                 if (GUILayout.Button("Browse", EditorStyles.miniButtonRight, GUILayout.Width(100))) { EditorUtility.RevealInFinder(_mainBuildPath); }
