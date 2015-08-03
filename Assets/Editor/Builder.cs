@@ -195,7 +195,7 @@ public class Builder : EditorWindow
             //Load scenes
             RefreshSceneList();
             window = GetWindowWithoutFocus();
-            window.Repaint();
+            if (window) window.Repaint();
         }
     }
 
@@ -437,7 +437,7 @@ public class Builder : EditorWindow
             case LoadMode.ProjectFolder:
                 string[] appPath = Application.dataPath.Split("/"[0]);
                 filePath = Path.Combine(Application.dataPath.Substring(0, Application.dataPath.LastIndexOf("/")), appPath[appPath.Length - 2] + "-Nidre.Builder.ini");
-                if (!!string.IsNullOrEmpty(filePath)) serialized = System.IO.File.ReadAllText(filePath);
+                if (!string.IsNullOrEmpty(filePath) && File.Exists(filePath)) serialized = System.IO.File.ReadAllText(filePath);
                 break;
         }
 
