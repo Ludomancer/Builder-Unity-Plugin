@@ -292,6 +292,7 @@ public class Builder : EditorWindow
     /// <param name="saveMode">Save Mode.</param>
     static void SaveSettings(SaveMode saveMode)
     {
+        if (_builds == null) return;
         Dictionary<string, object> settings = new Dictionary<string, object>();
         settings.Add("mainBuildPath", _mainBuildPath);
         settings.Add("buildCount", _builds.Count);
@@ -700,14 +701,14 @@ public class Builder : EditorWindow
     /// </summary>
     static void Build()
     {
-        List<BuildConfiguration> _toBeBuild = new List<BuildConfiguration>();
-        _toBeBuild.AddRange(_builds.ToArray());
+        List<BuildConfiguration> toBeBuild = new List<BuildConfiguration>();
+        toBeBuild.AddRange(_builds.ToArray());
 
         _timeStamp = DateTime.Now.ToString(_dateTimeFormat);
-        while (_toBeBuild.Count > 0)
+        while (toBeBuild.Count > 0)
         {
             System.Diagnostics.Stopwatch sw = new System.Diagnostics.Stopwatch();
-            BuildConfiguration bc = _toBeBuild[0];
+            BuildConfiguration bc = toBeBuild[0];
 
             if (_resetTarget)
             {
@@ -715,19 +716,19 @@ public class Builder : EditorWindow
                 if (bc.target.Equals(_switchBackTo))
                 {
                     //If there are other build targets
-                    if (_toBeBuild.Count(build => build.target != _switchBackTo) > 0)
+                    if (toBeBuild.Count(build => build.target != _switchBackTo) > 0)
                     {
                         //Add current item to the end of the list and skip to next item.
-                        _toBeBuild.Add(bc);
-                        _toBeBuild.RemoveAt(0);
+                        toBeBuild.Add(bc);
+                        toBeBuild.RemoveAt(0);
                         continue;
                     }
                 }
             }
 
-            if (!bc.enabled) { Debug.LogWarning(bc.name + " " + bc.uniqueId + " is Disabled. Skipped."); _toBeBuild.RemoveAt(0); }
-            else if (bc.scenes.Count == 0) { Debug.LogWarning(bc.name + " " + bc.uniqueId + " has no Scenes added. Skipped."); _toBeBuild.RemoveAt(0); }
-            else if (bc.scenes.Count(scene => !scene.isFound) > 0) { Debug.LogWarning(bc.name + " " + bc.uniqueId + " has missing Scenes. Skipped."); _toBeBuild.RemoveAt(0); }
+            if (!bc.enabled) { Debug.LogWarning(bc.name + " " + bc.uniqueId + " is Disabled. Skipped."); toBeBuild.RemoveAt(0); }
+            else if (bc.scenes.Count == 0) { Debug.LogWarning(bc.name + " " + bc.uniqueId + " has no Scenes added. Skipped."); toBeBuild.RemoveAt(0); }
+            else if (bc.scenes.Count(scene => !scene.isFound) > 0) { Debug.LogWarning(bc.name + " " + bc.uniqueId + " has missing Scenes. Skipped."); toBeBuild.RemoveAt(0); }
             else
             {
                 Debug.Log(bc.name + " Started...");
@@ -888,7 +889,21 @@ public class Builder : EditorWindow
 
                 Debug.Log("Building...");
                 Debug.Log("Path : " + buildPath);
-                string buildMessage = BuildPipeline.BuildPlayer(scenePaths, buildPath, bc.target, bc.options);
+                BuildOptions newBuildSettings = BuildOptions.None;
+                foreach (BuildOptions flag in bc.options.GetFlags())
+                {
+                    int intFlag = (int)flag;
+                    if (intFlag > 8)
+                    {
+                        newBuildSettings = newBuildSettings.SetFlags((BuildOptions)(intFlag >> 2), true);
+                    }
+                    else if (intFlag == 8)
+                    {
+                        newBuildSettings = newBuildSettings.SetFlags((BuildOptions)(intFlag >> 3), true);
+                    }
+                }
+
+                string buildMessage = BuildPipeline.BuildPlayer(scenePaths, buildPath, bc.target, newBuildSettings);
                 if (!string.IsNullOrEmpty(buildMessage))
                 {
                     Debug.LogError("Build Failed : " + buildMessage);
@@ -904,10 +919,10 @@ public class Builder : EditorWindow
                     PlayerSettings.targetGlesGraphics = targetGlesGraphicsBackup;
                 }
 
-                Debug.Log(bc.name + " Done. (" + sw.ElapsedMilliseconds + "ms)");
+                Debug.Log(string.Format("{0} Done. ({1}ms, {2}s)", bc.name, sw.ElapsedMilliseconds, (sw.ElapsedMilliseconds / 1000f)));
                 sw.Stop();
                 sw.Reset();
-                _toBeBuild.RemoveAt(0);
+                toBeBuild.RemoveAt(0);
             }
         }
 
@@ -916,7 +931,7 @@ public class Builder : EditorWindow
         {
             if (!EditorUserBuildSettings.activeBuildTarget.Equals(_switchBackTo)) EditorUserBuildSettings.SwitchActiveBuildTarget(_switchBackTo);
         }
-        _toBeBuild.Clear();
+        toBeBuild.Clear();
     }
 
     static void EditorUpdate()
@@ -1265,7 +1280,7 @@ public class Builder : EditorWindow
                         EditorGUI.indentLevel++;
                         EditorGUILayout.BeginHorizontal();
                         EditorGUILayout.LabelField("Build Options", GUILayout.Width(125));
-                        bc.options = (BuildOptions)EditorGUILayout.EnumMaskField("", bc.options);
+                        bc.options = (BuildOptions)(EditorGUILayout.EnumMaskField("", bc.options));
                         GUILayout.FlexibleSpace();
                         if (GUILayout.Button("Make default"))
                         {
